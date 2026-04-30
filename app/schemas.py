@@ -3,6 +3,20 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
+class TechnicalBatchRequest(BaseModel):
+    tickers: list[str] = Field(
+        min_length=1,
+        max_length=10,
+        description="Stock tickers to analyze in one request.",
+    )
+    days: int = Field(
+        default=450,
+        ge=80,
+        le=1000,
+        description="Calendar-day lookback used to fetch daily bars.",
+    )
+
+
 class Trend(BaseModel):
     above_20dma: bool
     above_50dma: bool
@@ -62,6 +76,7 @@ class TechnicalResponse(BaseModel):
     cache_hit: bool
     data_warnings: list[str] = Field(default_factory=list)
     not_financial_advice: bool = True
+    technical_summary: str
     price: float | None
     trend: Trend
     moving_averages: MovingAverages
@@ -69,3 +84,16 @@ class TechnicalResponse(BaseModel):
     momentum: Momentum
     levels: Levels
     candles_tail: list[Candle]
+
+
+class TechnicalBatchError(BaseModel):
+    ticker: str
+    status_code: int
+    detail: str
+
+
+class TechnicalBatchResponse(BaseModel):
+    requested_count: int
+    returned_count: int
+    results: list[TechnicalResponse]
+    errors: list[TechnicalBatchError] = Field(default_factory=list)

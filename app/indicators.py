@@ -143,7 +143,7 @@ def build_technical_summary(df: pd.DataFrame) -> dict:
     elif latest["macd"] < latest["macd_signal"] and latest["macd_histogram"] < 0:
         macd_signal_text = "negative"
 
-    return {
+    summary = {
         "as_of": str(latest["date"]),
         "bars_returned": bars_returned,
         "data_warnings": data_warnings,
@@ -198,3 +198,45 @@ def build_technical_summary(df: pd.DataFrame) -> dict:
             for _, row in df.tail(10).iterrows()
         ],
     }
+
+    summary["technical_summary"] = build_summary_text(summary)
+
+    return summary
+
+
+def build_summary_text(summary: dict) -> str:
+    trend = summary["trend"]
+    moving_averages = summary["moving_averages"]
+    momentum = summary["momentum"]
+    volume = summary["volume"]
+
+    ma_position = []
+    if trend["above_20dma"]:
+        ma_position.append("above the 20-day moving average")
+    if trend["above_50dma"]:
+        ma_position.append("above the 50-day moving average")
+    if trend["above_200dma"]:
+        ma_position.append("above the 200-day moving average")
+
+    if ma_position:
+        ma_text = ", ".join(ma_position)
+    elif moving_averages["sma_20"] or moving_averages["sma_50"] or moving_averages["sma_200"]:
+        ma_text = "below one or more major moving averages"
+    else:
+        ma_text = "with limited moving-average history"
+
+    rsi_text = "RSI unavailable"
+    if momentum["rsi_14"] is not None:
+        rsi_text = f"RSI is {momentum['rsi_14']}"
+
+    macd_text = f"MACD momentum is {momentum['macd_signal_text']}"
+
+    volume_ratio = volume["volume_ratio_vs_20d"]
+    volume_text = "20-day volume comparison is unavailable"
+    if volume_ratio is not None:
+        volume_text = f"volume is {volume_ratio}x its 20-day average"
+
+    return (
+        f"Technical trend is {trend['ma_alignment']}, price is {ma_text}, "
+        f"{rsi_text}, {macd_text}, and {volume_text}."
+    )

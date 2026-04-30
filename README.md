@@ -2,7 +2,7 @@
 
 FastAPI backend for Custom GPT stock-research Actions.
 
-The API fetches split-adjusted daily OHLCV data from Polygon, computes technical indicators, and returns compact GPT-friendly JSON with source metadata, cache status, and data-quality warnings.
+The API fetches split-adjusted daily OHLCV data from Massive/Polygon, computes technical indicators, and returns compact GPT-friendly JSON with source metadata, cache status, a deterministic summary, and data-quality warnings.
 
 ## Architecture
 
@@ -10,10 +10,10 @@ The API fetches split-adjusted daily OHLCV data from Polygon, computes technical
 Custom GPT
   -> built-in web search for news and qualitative context
   -> GPT Action call to this FastAPI backend for market technicals
-  -> Polygon.io API for source OHLCV data
+  -> Massive/Polygon API for source OHLCV data
 ```
 
-Keep the Polygon key on the backend. ChatGPT should call this service, not Polygon directly.
+Keep the market-data API key on the backend. ChatGPT should call this service, not Massive/Polygon directly.
 
 ## Setup
 
@@ -28,9 +28,12 @@ Create `.env`:
 ```bash
 POLYGON_API_KEY=your_polygon_key
 ACTION_API_KEY=your_optional_action_key
+POLYGON_BASE_URL=https://api.massive.com
+MARKET_CACHE_TTL_SECONDS=1800
 ```
 
 `ACTION_API_KEY` is optional for local development. If set, callers must send it as `X-API-Key`.
+`POLYGON_BASE_URL` defaults to Massive's API host. `https://api.polygon.io` remains configurable for backward compatibility.
 
 ## Run
 
@@ -42,6 +45,7 @@ uvicorn app.main:app --reload --port 8000
 
 - `GET /health`
 - `GET /v1/market/technicals/{ticker}`
+- `POST /v1/market/technicals/batch`
 - `GET /openapi.json`
 
 ## Example request
@@ -49,6 +53,15 @@ uvicorn app.main:app --reload --port 8000
 ```bash
 curl 'http://localhost:8000/v1/market/technicals/AAPL?days=450' \
   -H 'X-API-Key: your_optional_action_key'
+```
+
+## Example batch request
+
+```bash
+curl -X POST 'http://localhost:8000/v1/market/technicals/batch' \
+  -H 'Content-Type: application/json' \
+  -H 'X-API-Key: your_optional_action_key' \
+  -d '{"tickers":["AAPL","MSFT","NVDA"],"days":450}'
 ```
 
 ## GPT Action setup
@@ -61,6 +74,6 @@ curl 'http://localhost:8000/v1/market/technicals/AAPL?days=450' \
 ## Safety notes
 
 - This API returns technical-analysis data only; it does not make investment decisions.
-- Repeated identical Polygon requests are cached in memory for 5 minutes.
+- Repeated identical market-data requests are cached in memory for 30 minutes by default.
 - Rotate your Polygon key if it was ever committed to git.
 - Do not commit `.env`, `.venv/`, or `__pycache__/`.

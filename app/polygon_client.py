@@ -7,8 +7,6 @@ import httpx
 from app.config import settings
 
 
-POLYGON_BASE_URL = "https://api.polygon.io"
-CACHE_TTL_SECONDS = 300
 MAX_RETRIES = 2
 
 _cache: dict[tuple[str, int, bool], tuple[datetime, list[dict[str, Any]], dict[str, Any]]] = {}
@@ -28,14 +26,14 @@ async def get_daily_bars(
     now = datetime.now(UTC)
     if cached:
         cached_at, cached_bars, cached_metadata = cached
-        if (now - cached_at).total_seconds() < CACHE_TTL_SECONDS:
+        if (now - cached_at).total_seconds() < settings.market_cache_ttl_seconds:
             return cached_bars, {**cached_metadata, "cache_hit": True}
 
     end = date.today()
     start = end - timedelta(days=days)
 
     url = (
-        f"{POLYGON_BASE_URL}/v2/aggs/ticker/{ticker.upper()}"
+        f"{settings.polygon_base_url.rstrip('/')}/v2/aggs/ticker/{ticker.upper()}"
         f"/range/1/day/{start.isoformat()}/{end.isoformat()}"
     )
 
