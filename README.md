@@ -27,13 +27,15 @@ Create `.env`:
 
 ```bash
 POLYGON_API_KEY=your_polygon_key
-ACTION_API_KEY=your_optional_action_key
+API_KEY=your_optional_action_key
 POLYGON_BASE_URL=https://api.massive.com
-MARKET_CACHE_TTL_SECONDS=1800
+MARKET_CACHE_TTL_SECONDS=300
 ```
 
-`ACTION_API_KEY` is optional for local development. If set, callers must send it as `X-API-Key`.
+`API_KEY` is optional for local development. If set, callers must send it as `X-API-Key`.
+`ACTION_API_KEY` is also supported for backward compatibility.
 `POLYGON_BASE_URL` defaults to Massive's API host. `https://api.polygon.io` remains configurable for backward compatibility.
+`MARKET_CACHE_TTL_SECONDS` defaults to 300 seconds.
 
 ## Run
 
@@ -47,6 +49,18 @@ uvicorn app.main:app --reload --port 8000
 - `GET /v1/market/technicals/{ticker}`
 - `POST /v1/market/technicals/batch`
 - `GET /openapi.json`
+
+## Technical fields
+
+Responses include:
+
+- Trend: price position vs 20/50/200-day SMAs, moving-average alignment, latest EMA crossover.
+- Moving averages: SMA 20/50/200 and EMA 12/26.
+- Momentum: RSI 14, MACD/signal/histogram, MACD signal text, 5/20/60-day returns.
+- Volatility: Bollinger Bands, Bollinger bandwidth, Bollinger percent B, and ATR 14.
+- Levels: 20-day support/resistance and 52-week high/low metrics when enough history is available.
+- Recent candles: last 10 daily OHLCV bars.
+- Metadata: source, adjusted flag, lookback days, bars returned, cache hit, warnings, and non-advice flag.
 
 ## Example request
 
@@ -68,12 +82,39 @@ curl -X POST 'http://localhost:8000/v1/market/technicals/batch' \
 
 1. Deploy this API to an HTTPS URL.
 2. In the GPT editor, create an Action and import `https://your-domain.example/openapi.json`.
-3. If `ACTION_API_KEY` is enabled, configure Action authentication as an API key using custom header `X-API-Key`.
+3. If `API_KEY` or `ACTION_API_KEY` is enabled, configure Action authentication as an API key using custom header `X-API-Key`.
 4. In the GPT instructions, tell the GPT to use web search for news/context and this Action for deterministic market technical data.
+
+## Error responses
+
+Errors return structured, GPT-friendly JSON:
+
+```json
+{
+  "error": "polygon_rate_limited",
+  "message": "Polygon.io rate limit exceeded while fetching market data. Retry after the provider window resets.",
+  "status_code": 429,
+  "retryable": true
+}
+```
+
+The OpenAPI schema documents structured responses for `403`, `404`, `429`, and `500`. Polygon rate limits are detected and returned as `429`.
+
+## Caching
+
+Identical market-data requests are cached in memory for 5 minutes by default. This reduces repeated Polygon.io calls during GPT Action retries or follow-up questions. The cache is process-local and resets when the server restarts.
+
+## Tests
+
+```bash
+pytest
+```
+
+The indicator suite covers RSI, MACD, returns, rounding, Bollinger Bands, ATR, EMA crossover detection, dataframe conversion, summary generation, and edge cases.
 
 ## Safety notes
 
 - This API returns technical-analysis data only; it does not make investment decisions.
-- Repeated identical market-data requests are cached in memory for 30 minutes by default.
+- Repeated identical market-data requests are cached in memory for 5 minutes by default.
 - Rotate your Polygon key if it was ever committed to git.
 - Do not commit `.env`, `.venv/`, or `__pycache__/`.

@@ -22,8 +22,10 @@ async def get_daily_bars(
     We fetch ~400 calendar days so we have enough trading days for SMA 200.
     """
     cache_key = (ticker.upper(), days, adjusted)
-    cached = _cache.get(cache_key)
     now = datetime.now(UTC)
+    _delete_expired_cache_entries(now)
+
+    cached = _cache.get(cache_key)
     if cached:
         cached_at, cached_bars, cached_metadata = cached
         if (now - cached_at).total_seconds() < settings.market_cache_ttl_seconds:
@@ -67,9 +69,24 @@ async def get_daily_bars(
     }
 
     bars = data.get("results", [])
-    _cache[cache_key] = (now, bars, metadata)
+    _cache[cache_key] = (datetime.now(UTC), bars, metadata)
 
     return bars, metadata
+
+
+def clear_cache() -> None:
+    _cache.clear()
+
+
+def _delete_expired_cache_entries(now: datetime) -> None:
+    expired_keys = [
+        cache_key
+        for cache_key, (cached_at, _, _) in _cache.items()
+        if (now - cached_at).total_seconds() >= settings.market_cache_ttl_seconds
+    ]
+
+    for cache_key in expired_keys:
+        del _cache[cache_key]
 
 
 def _retry_delay_seconds(response: httpx.Response, attempt: int) -> float:

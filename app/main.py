@@ -2,11 +2,12 @@ from typing import Annotated, Any
 
 import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Path, Query, status
+from fastapi.responses import JSONResponse
 
 from app.config import settings
 from app.indicators import bars_to_dataframe, build_technical_summary
 from app.polygon_client import get_daily_bars
-from app.schemas import TechnicalBatchRequest, TechnicalBatchResponse, TechnicalResponse
+from app.schemas import ErrorResponse, TechnicalBatchRequest, TechnicalBatchResponse, TechnicalResponse
 
 
 app = FastAPI(
@@ -14,6 +15,79 @@ app = FastAPI(
     version="0.1.0",
     description="Market technical analysis API for GPT-powered trading research.",
 )
+
+
+ERROR_RESPONSES = {
+    403: {"model": ErrorResponse, "description": "API key is missing or invalid."},
+    404: {"model": ErrorResponse, "description": "Requested market data was not found."},
+    429: {"model": ErrorResponse, "description": "Market data provider rate limit exceeded."},
+    500: {"model": ErrorResponse, "description": "Unexpected server error."},
+}
+
+
+def build_error_payload(
+    status_code: int,
+    message: str,
+    error: str | None = None,
+    retryable: bool | None = None,
+) -> dict[str, Any]:
+    if retryable is None:
+        retryable = status_code in {
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            status.HTTP_502_BAD_GATEWAY,
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            status.HTTP_504_GATEWAY_TIMEOUT,
+        }
+
+    error_name_by_status = {
+        status.HTTP_400_BAD_REQUEST: "bad_request",
+        status.HTTP_403_FORBIDDEN: "forbidden",
+        status.HTTP_404_NOT_FOUND: "not_found",
+        status.HTTP_422_UNPROCESSABLE_ENTITY: "invalid_request",
+        status.HTTP_429_TOO_MANY_REQUESTS: "rate_limited",
+        status.HTTP_500_INTERNAL_SERVER_ERROR: "internal_error",
+        status.HTTP_502_BAD_GATEWAY: "upstream_error",
+        status.HTTP_504_GATEWAY_TIMEOUT: "upstream_timeout",
+    }
+
+    return ErrorResponse(
+        error=error or error_name_by_status.get(status_code, "request_error"),
+        message=message,
+        status_code=status_code,
+        retryable=retryable,
+    ).model_dump()
+
+
+def http_exception_to_error_payload(error: HTTPException) -> dict[str, Any]:
+    if isinstance(error.detail, dict):
+        return ErrorResponse(**error.detail).model_dump()
+
+    return build_error_payload(
+        status_code=error.status_code,
+        message=str(error.detail),
+    )
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(_, error: HTTPException):
+    return JSONResponse(
+        status_code=error.status_code,
+        content=http_exception_to_error_payload(error),
+        headers=error.headers,
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(_, error: Exception):
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content=build_error_payload(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            message="Unexpected server error while building market technicals.",
+            error="internal_error",
+            retryable=False,
+        ),
+    )
 
 
 @app.get("/health")
@@ -24,12 +98,13 @@ async def health():
 async def verify_action_api_key(
     x_api_key: Annotated[str | None, Header(alias="X-API-Key")] = None,
 ):
-    if not settings.action_api_key:
+    required_api_key = settings.required_api_key
+    if not required_api_key:
         return
 
-    if x_api_key != settings.action_api_key:
+    if x_api_key != required_api_key:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
+            status_code=status.HTTP_403_FORBIDDEN,
             detail="Invalid or missing API key",
         )
 
@@ -65,7 +140,21 @@ def market_error_to_http_exception(error: Exception) -> HTTPException:
         if upstream_status == status.HTTP_429_TOO_MANY_REQUESTS:
             return HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Market data provider rate limit exceeded; retry later.",
+                detail=build_error_payload(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    message=(
+                        "Polygon.io rate limit exceeded while fetching market data. "
+                        "Retry after the provider window resets."
+                    ),
+                    error="polygon_rate_limited",
+                    retryable=True,
+                ),
+            )
+
+        if upstream_status == status.HTTP_404_NOT_FOUND:
+            return HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Market data provider could not find data for the requested ticker.",
             )
 
         if 400 <= upstream_status < 500:
@@ -103,9 +192,11 @@ def market_error_to_http_exception(error: Exception) -> HTTPException:
     operation_id="getBatchStockTechnicals",
     summary="Get batch stock technicals",
     description=(
-        "Returns RSI, MACD, moving averages, volume, support/resistance, "
-        "52-week levels, recent candles, warnings, and summaries for stock tickers."
+        "Returns RSI, MACD, Bollinger Bands, ATR, EMA crossover, moving averages, "
+        "volume, support/resistance, 52-week levels, recent candles, warnings, "
+        "and summaries for stock tickers."
     ),
+    responses=ERROR_RESPONSES,
 )
 async def get_batch_market_technicals(
     request: TechnicalBatchRequest,
@@ -133,8 +224,7 @@ async def get_batch_market_technicals(
             errors.append(
                 {
                     "ticker": normalized_ticker or ticker,
-                    "status_code": http_error.status_code,
-                    "detail": str(http_error.detail),
+                    **http_exception_to_error_payload(http_error),
                 }
             )
 
@@ -152,9 +242,11 @@ async def get_batch_market_technicals(
     operation_id="getStockTechnicals",
     summary="Get stock technicals",
     description=(
-        "Returns RSI, MACD, moving averages, volume, support/resistance, "
-        "52-week levels, recent candles, warnings, and a summary for one stock ticker."
+        "Returns RSI, MACD, Bollinger Bands, ATR, EMA crossover, moving averages, "
+        "volume, support/resistance, 52-week levels, recent candles, warnings, "
+        "and a summary for one stock ticker."
     ),
+    responses=ERROR_RESPONSES,
 )
 async def get_market_technicals(
     ticker: str = Path(description="Stock ticker to analyze."),

@@ -6,3 +6,4 @@ pydantic-settings
 python-dotenv
 pandas
 numpy
+pytest

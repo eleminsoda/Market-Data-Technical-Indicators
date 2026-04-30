@@ -22,12 +22,15 @@ class Trend(BaseModel):
     above_50dma: bool
     above_200dma: bool
     ma_alignment: Literal["bullish", "bearish", "mixed", "unknown"]
+    ema_crossover: Literal["bullish", "bearish", "none", "insufficient_data"]
 
 
 class MovingAverages(BaseModel):
     sma_20: float | None
     sma_50: float | None
     sma_200: float | None
+    ema_12: float | None
+    ema_26: float | None
 
 
 class VolumeSummary(BaseModel):
@@ -45,6 +48,15 @@ class Momentum(BaseModel):
     return_5d_pct: float | None
     return_20d_pct: float | None
     return_60d_pct: float | None
+
+
+class Volatility(BaseModel):
+    atr_14: float | None
+    bollinger_middle: float | None
+    bollinger_upper: float | None
+    bollinger_lower: float | None
+    bollinger_bandwidth_pct: float | None
+    bollinger_percent_b: float | None
 
 
 class Levels(BaseModel):
@@ -82,14 +94,24 @@ class TechnicalResponse(BaseModel):
     moving_averages: MovingAverages
     volume: VolumeSummary
     momentum: Momentum
+    volatility: Volatility
     levels: Levels
     candles_tail: list[Candle]
+
+
+class ErrorResponse(BaseModel):
+    error: str
+    message: str
+    status_code: int
+    retryable: bool = False
 
 
 class TechnicalBatchError(BaseModel):
     ticker: str
     status_code: int
-    detail: str
+    error: str
+    message: str
+    retryable: bool = False
 
 
 class TechnicalBatchResponse(BaseModel):
