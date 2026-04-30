@@ -1,8 +1,10 @@
 from pydantic import AliasChoices, Field
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env")
+
     polygon_api_key: str
     action_api_key: str | None = Field(
         default=None,
@@ -14,9 +16,6 @@ class Settings(BaseSettings):
     @property
     def required_api_key(self) -> str | None:
         return self.action_api_key
-
-    class Config:
-        env_file = ".env"
 
 
 settings = Settings()

@@ -2,6 +2,7 @@ from typing import Annotated, Any
 
 import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Path, Query, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app.config import settings
@@ -9,6 +10,8 @@ from app.indicators import bars_to_dataframe, build_technical_summary
 from app.polygon_client import get_daily_bars
 from app.schemas import ErrorResponse, TechnicalBatchRequest, TechnicalBatchResponse, TechnicalResponse
 
+
+HTTP_422_UNPROCESSABLE_ENTITY = 422
 
 app = FastAPI(
     title="Market Technical API",
@@ -21,6 +24,7 @@ ERROR_RESPONSES = {
     400: {"model": ErrorResponse, "description": "Market data provider rejected the request."},
     403: {"model": ErrorResponse, "description": "API key is missing or invalid."},
     404: {"model": ErrorResponse, "description": "Requested market data was not found."},
+    422: {"model": ErrorResponse, "description": "Request validation failed."},
     429: {"model": ErrorResponse, "description": "Market data provider rate limit exceeded."},
     500: {"model": ErrorResponse, "description": "Unexpected server error."},
     502: {"model": ErrorResponse, "description": "Market data provider returned an upstream error."},
@@ -46,7 +50,7 @@ def build_error_payload(
         status.HTTP_400_BAD_REQUEST: "bad_request",
         status.HTTP_403_FORBIDDEN: "forbidden",
         status.HTTP_404_NOT_FOUND: "not_found",
-        status.HTTP_422_UNPROCESSABLE_ENTITY: "invalid_request",
+        HTTP_422_UNPROCESSABLE_ENTITY: "invalid_request",
         status.HTTP_429_TOO_MANY_REQUESTS: "rate_limited",
         status.HTTP_500_INTERNAL_SERVER_ERROR: "internal_error",
         status.HTTP_502_BAD_GATEWAY: "upstream_error",
@@ -77,6 +81,32 @@ async def http_exception_handler(_, error: HTTPException):
         status_code=error.status_code,
         content=http_exception_to_error_payload(error),
         headers=error.headers,
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_exception_handler(_, error: RequestValidationError):
+    errors = error.errors()
+    first_error = errors[0] if errors else {}
+    location = ".".join(str(part) for part in first_error.get("loc", []))
+    validation_message = first_error.get("msg", "Request validation failed.")
+
+    if location:
+        message = f"Invalid request field '{location}': {validation_message}"
+    else:
+        message = f"Invalid request: {validation_message}"
+
+    if len(errors) > 1:
+        message = f"{message} ({len(errors)} validation errors total)"
+
+    return JSONResponse(
+        status_code=HTTP_422_UNPROCESSABLE_ENTITY,
+        content=build_error_payload(
+            status_code=HTTP_422_UNPROCESSABLE_ENTITY,
+            message=message,
+            error="invalid_request",
+            retryable=False,
+        ),
     )
 
 
@@ -201,7 +231,7 @@ def market_error_to_http_exception(error: Exception) -> HTTPException:
         )
 
     if isinstance(error, ValueError):
-        return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error))
+        return HTTPException(status_code=HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error))
 
     return HTTPException(status_code=500, detail=str(error))
 

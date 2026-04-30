@@ -37,6 +37,8 @@ MARKET_CACHE_TTL_SECONDS=300
 `POLYGON_BASE_URL` defaults to Massive's API host. `https://api.polygon.io` remains configurable for backward compatibility.
 `MARKET_CACHE_TTL_SECONDS` defaults to 300 seconds.
 
+For public deployments, set `API_KEY` and configure GPT Action authentication to send it as the `X-API-Key` header. Keep `POLYGON_API_KEY` server-side only; callers should never receive the market-data provider key.
+
 ## Run
 
 ```bash
@@ -98,7 +100,7 @@ Errors return structured, GPT-friendly JSON:
 }
 ```
 
-The OpenAPI schema documents structured responses for `403`, `404`, `429`, and `500`. Polygon rate limits are detected and returned as `429`.
+The OpenAPI schema documents structured responses for `400`, `403`, `404`, `422`, `429`, `500`, `502`, and `504`. Polygon rate limits are detected and returned as `429`. Upstream market-data authentication or permission failures return `502` with `error: "market_data_auth_failed"` so key/base-URL issues are easier to debug.
 
 ## Caching
 
@@ -110,7 +112,7 @@ Identical market-data requests are cached in memory for 5 minutes by default. Th
 pytest
 ```
 
-The indicator suite covers RSI, MACD, returns, rounding, Bollinger Bands, ATR, EMA crossover detection, dataframe conversion, summary generation, and edge cases.
+The test suite covers RSI, MACD, returns, rounding, Bollinger Bands, ATR, EMA crossover detection, dataframe conversion, summary generation, endpoint validation, auth failures, upstream error mapping, batch partial failures, and cache hits.
 
 ## Safety notes
 
