@@ -18,10 +18,13 @@ app = FastAPI(
 
 
 ERROR_RESPONSES = {
+    400: {"model": ErrorResponse, "description": "Market data provider rejected the request."},
     403: {"model": ErrorResponse, "description": "API key is missing or invalid."},
     404: {"model": ErrorResponse, "description": "Requested market data was not found."},
     429: {"model": ErrorResponse, "description": "Market data provider rate limit exceeded."},
     500: {"model": ErrorResponse, "description": "Unexpected server error."},
+    502: {"model": ErrorResponse, "description": "Market data provider returned an upstream error."},
+    504: {"model": ErrorResponse, "description": "Market data provider request timed out."},
 }
 
 
@@ -155,6 +158,23 @@ def market_error_to_http_exception(error: Exception) -> HTTPException:
             return HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Market data provider could not find data for the requested ticker.",
+            )
+
+        if upstream_status in {
+            status.HTTP_401_UNAUTHORIZED,
+            status.HTTP_403_FORBIDDEN,
+        }:
+            return HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=build_error_payload(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    message=(
+                        "Market data provider rejected the configured API key or permissions. "
+                        "Check POLYGON_API_KEY and POLYGON_BASE_URL."
+                    ),
+                    error="market_data_auth_failed",
+                    retryable=False,
+                ),
             )
 
         if 400 <= upstream_status < 500:
