@@ -1,4 +1,8 @@
-fastapi==0.116.0
-uvicorn==0.35.0
-pandas==2.3.1
-requests==2.32.4
+fastapi
+uvicorn
+httpx
+pydantic
+pydantic-settings
+python-dotenv
+pandas
+numpy
