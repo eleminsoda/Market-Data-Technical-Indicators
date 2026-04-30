@@ -78,6 +78,9 @@ def build_technical_summary(df: pd.DataFrame) -> dict:
     if df.empty or len(df) < 50:
         raise ValueError("Not enough market data to compute technicals")
 
+    data_warnings: list[str] = []
+    bars_returned = len(df)
+
     close = df["close"]
     volume = df["volume"]
 
@@ -110,8 +113,20 @@ def build_technical_summary(df: pd.DataFrame) -> dict:
     recent_support_20d = float(recent_20["low"].min())
     recent_resistance_20d = float(recent_20["high"].max())
 
-    high_52w = float(recent_252["high"].max())
-    low_52w = float(recent_252["low"].min())
+    high_52w = None
+    low_52w = None
+    if bars_returned >= 252:
+        high_52w = float(recent_252["high"].max())
+        low_52w = float(recent_252["low"].min())
+    else:
+        data_warnings.append(
+            "Fewer than 252 trading bars returned; 52-week high/low metrics are unavailable."
+        )
+
+    if bars_returned < 200:
+        data_warnings.append(
+            "Fewer than 200 trading bars returned; SMA 200 and related trend fields are unavailable."
+        )
 
     ma_alignment = "unknown"
     if sma_20 and sma_50 and sma_200:
@@ -130,6 +145,8 @@ def build_technical_summary(df: pd.DataFrame) -> dict:
 
     return {
         "as_of": str(latest["date"]),
+        "bars_returned": bars_returned,
+        "data_warnings": data_warnings,
         "price": round_or_none(price),
         "trend": {
             "above_20dma": bool(sma_20 and price > sma_20),
@@ -162,8 +179,12 @@ def build_technical_summary(df: pd.DataFrame) -> dict:
             "resistance_20d_high": round_or_none(recent_resistance_20d),
             "high_52w": round_or_none(high_52w),
             "low_52w": round_or_none(low_52w),
-            "distance_from_52w_high_pct": round_or_none((price / high_52w - 1) * 100),
-            "distance_from_52w_low_pct": round_or_none((price / low_52w - 1) * 100),
+            "distance_from_52w_high_pct": round_or_none(
+                (price / high_52w - 1) * 100 if high_52w else None
+            ),
+            "distance_from_52w_low_pct": round_or_none(
+                (price / low_52w - 1) * 100 if low_52w else None
+            ),
         },
         "candles_tail": [
             {

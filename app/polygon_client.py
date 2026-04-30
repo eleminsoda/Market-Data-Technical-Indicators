@@ -1,4 +1,5 @@
-from datetime import date, timedelta
+import asyncio
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -7,17 +8,29 @@ from app.config import settings
 
 
 POLYGON_BASE_URL = "https://api.polygon.io"
+CACHE_TTL_SECONDS = 300
+MAX_RETRIES = 2
+
+_cache: dict[tuple[str, int, bool], tuple[datetime, list[dict[str, Any]], dict[str, Any]]] = {}
 
 
 async def get_daily_bars(
     ticker: str,
     days: int = 400,
     adjusted: bool = True,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """
     Fetch daily OHLCV bars from Polygon.
     We fetch ~400 calendar days so we have enough trading days for SMA 200.
     """
+    cache_key = (ticker.upper(), days, adjusted)
+    cached = _cache.get(cache_key)
+    now = datetime.now(UTC)
+    if cached:
+        cached_at, cached_bars, cached_metadata = cached
+        if (now - cached_at).total_seconds() < CACHE_TTL_SECONDS:
+            return cached_bars, {**cached_metadata, "cache_hit": True}
+
     end = date.today()
     start = end - timedelta(days=days)
 
@@ -34,8 +47,39 @@ async def get_daily_bars(
     }
 
     async with httpx.AsyncClient(timeout=20) as client:
-        response = await client.get(url, params=params)
-        response.raise_for_status()
-        data = response.json()
+        for attempt in range(MAX_RETRIES + 1):
+            response = await client.get(url, params=params)
+            should_retry = response.status_code == 429 or response.status_code >= 500
 
-    return data.get("results", [])
+            if should_retry and attempt < MAX_RETRIES:
+                await asyncio.sleep(_retry_delay_seconds(response, attempt))
+                continue
+
+            response.raise_for_status()
+            data = response.json()
+            break
+
+    metadata = {
+        "adjusted": data.get("adjusted", adjusted),
+        "request_id": data.get("request_id"),
+        "status": data.get("status"),
+        "query_count": data.get("queryCount"),
+        "results_count": data.get("resultsCount"),
+        "cache_hit": False,
+    }
+
+    bars = data.get("results", [])
+    _cache[cache_key] = (now, bars, metadata)
+
+    return bars, metadata
+
+
+def _retry_delay_seconds(response: httpx.Response, attempt: int) -> float:
+    retry_after = response.headers.get("Retry-After")
+    if retry_after:
+        try:
+            return min(float(retry_after), 5.0)
+        except ValueError:
+            pass
+
+    return 0.5 * (2**attempt)
