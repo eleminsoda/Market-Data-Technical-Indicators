@@ -87,6 +87,8 @@ curl -X POST 'http://localhost:8000/v1/market/technicals/batch' \
 3. If `API_KEY` or `ACTION_API_KEY` is enabled, configure Action authentication as an API key using custom header `X-API-Key`.
 4. In the GPT instructions, tell the GPT to use web search for news/context and this Action for deterministic market technical data.
 
+See [ChatGPT Action Usage Guide](docs/chatgpt-action-usage.md) for copy-paste GPT instructions, expected response fields, interpretation guidance, and error handling.
+
 ## Error responses
 
 Errors return structured, GPT-friendly JSON:
