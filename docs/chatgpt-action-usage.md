@@ -1,6 +1,12 @@
-# ChatGPT Action Usage Guide
+# Market Technical API Action Usage Guide
 
 This guide tells a Custom GPT how to use the Market Technical API Action for deterministic market technical data.
+
+## Document Scope
+
+This document is a backend Action usage guide. It explains how a Custom GPT should call the Market Technical API Action and interpret its returned fields.
+
+This document should not define the Custom GPT's full investment workflow, user-specific decision framework, long/short strategy rules, portfolio rules, or final action categories. Those belong in the Custom GPT Instructions, not in this backend usage guide.
 
 ## Purpose
 
@@ -66,6 +72,39 @@ X-API-Key: <action-api-key>
 ```
 
 This is the API key for the backend Action, not the market-data provider key.
+
+## Required Data Disclosure
+
+When using Action-derived technical data, the assistant must disclose:
+
+- `as_of` date.
+- Latest close / price.
+- That the data is daily-bar technical data, not intraday data.
+- Relevant `data_warnings`.
+- Whether trend scores are partial because `trend_score_max < 5`.
+- That the output is technical-analysis context only, not financial advice.
+
+## Daily Data Limitation
+
+The Action returns daily-bar-derived data. It should not be used to make claims about:
+
+- Live intraday price action.
+- Real-time order flow.
+- Intraday support/resistance.
+- Minute-level momentum.
+- Live volume pace during the current trading session.
+
+If the user asks about intraday movement, say the Action only provides daily-bar technical context and use web search or another real-time data source if available.
+
+## No Data, No Technical Claim
+
+If the Action does not return a field, or the field is `null`, the assistant must not infer or fabricate it.
+
+Examples:
+
+- If `sma_200` is unavailable, do not discuss the stock as above or below the 200-day SMA.
+- If `previous_20d_avg_volume` is unavailable, do not claim a volume-confirmed breakout or breakdown.
+- If 52-week levels are unavailable, do not discuss proximity to 52-week highs or lows.
 
 ## Expected Successful Response
 
@@ -366,6 +405,29 @@ Use `gap.gap_pct`, `gap_direction`, and `large_gap` to explain latest open-versu
 
 Use `candles_tail` when the user asks for recent price action, recent candles, or exact recent OHLCV values.
 
+## Field Priority
+
+For detailed reasoning, prefer structured fields over `technical_summary`.
+
+Use `technical_summary` only as a quick overview. When there is a mismatch between `technical_summary` and structured fields, rely on the structured fields and explain the specific fields used.
+
+## Batch Comparison Rule
+
+When comparing multiple tickers, do not rank them solely by `trend_score`.
+
+Use a combined view:
+
+- `trend_score / trend_score_max`.
+- `trend_strength`.
+- Distance from 20/50/200-day SMAs.
+- Volume confirmation.
+- Breakout/breakdown state.
+- Range position.
+- Liquidity tier.
+- Data warnings.
+
+If some tickers have partial trend scores and others have full trend scores, explicitly call this out before comparing them.
+
 ## Recommended Answer Pattern
 
 When responding to the user after calling the Action:
@@ -425,28 +487,24 @@ If `error` is `market_data_auth_failed`, tell the user the backend provider key 
 - Do not reveal, infer, or request backend secrets.
 - Do not fabricate missing fields. If a field is `null`, say it is unavailable.
 - Do not overstate signals when indicators are mixed.
-- If the user asks whether to buy, sell, or hold, provide balanced technical context and suggest considering risk tolerance, time horizon, fundamentals, and professional advice.
+- If the user asks whether to buy, sell, or hold, provide balanced technical context, note that the backend only supplies technical data, and avoid turning backend fields into a standalone investment decision.
 
-## Copy-Paste GPT Instructions
+## Minimal Backend Tool Instructions
 
-Use the following in the Custom GPT instructions:
+Use the following in Custom GPT instructions when you only need backend tool-usage rules:
 
 ```text
-You have access to the Market Technical API Action for deterministic daily stock technical data.
-
 Use getStockTechnicals for one ticker and getBatchStockTechnicals for 2 to 10 tickers. The default days value is 450; only request 80 to 1000 days. Use batch requests for comparisons or watchlists.
 
-Use this Action for technical indicators, recent daily candles, trend state, trend scores, moving-average distance, volume confirmation, breakout/breakdown state, range structure, liquidity, gap context, volatility, support/resistance references, and structured market-data summaries. Use web search for news, earnings, macro context, fundamentals, and qualitative context. Clearly separate Action-derived technical data from web/news context.
+Use this Action for daily technical indicators, recent daily candles, trend state, trend scores, moving-average distance, volume confirmation, breakout/breakdown state, range structure, liquidity, gap context, volatility, and support/resistance references.
 
-For detailed reasoning, prefer structured fields over technical_summary. Use technical_summary as a quick overview, then base analysis on trend, moving_averages, volume, momentum, volatility, levels, breakout, structure, liquidity, gap, candles_tail, and data_warnings.
+Use web search for news, earnings, macro, fundamentals, and qualitative context. Clearly separate Action-derived technical data from web/news context.
 
-Always mention the response as_of date, latest close, relevant warnings, and that the analysis is not financial advice. Do not claim the data is intraday or real time. Treat support/resistance and indicators as reference points, not guarantees.
+Always mention as_of, latest close, relevant data_warnings, and that this is technical-analysis context only, not financial advice.
 
-When comparing tickers, use trend_score, trend_score_max, trend_strength, volume confirmation, liquidity_tier, and range/breakout fields. If trend_score_max is less than 5, say the trend score is partial rather than treating missing data as bearish.
+Do not claim this Action provides real-time intraday data. Do not fabricate missing fields. Do not expose or request backend secrets.
 
-Do not rank batch results solely by trend_score. Prefer a combined view: trend_score/trend_score_max, distance from SMAs, volume confirmation, breakout/structure, liquidity, and data_warnings.
+For detailed reasoning, prefer structured fields over technical_summary.
 
-If a response has data_warnings, qualify the analysis. If batch results contain errors, explain which tickers succeeded and which failed. If the API returns market_data_auth_failed, say the backend market-data provider key or base URL needs to be checked; do not ask the user for POLYGON_API_KEY.
-
-Never expose or request backend secrets. Never call Polygon or Massive directly.
+If batch results contain errors, explain which tickers succeeded and which failed. If the API returns market_data_auth_failed, say the backend market-data provider key or base URL needs to be checked; do not ask the user for POLYGON_API_KEY.
 ```
