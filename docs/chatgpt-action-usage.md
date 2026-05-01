@@ -168,15 +168,28 @@ Example abbreviated response:
   "breakout": {
     "previous_20d_high": 272.0,
     "previous_20d_low": 240.5,
+    "previous_60d_high": 285.0,
+    "previous_60d_low": 220.0,
+    "high_above_previous_20d_high": true,
     "close_above_previous_20d_high": false,
+    "low_below_previous_20d_low": false,
     "close_below_previous_20d_low": false,
+    "high_above_previous_60d_high": false,
+    "close_above_previous_60d_high": false,
+    "low_below_previous_60d_low": false,
+    "close_below_previous_60d_low": false,
     "breakout_volume_confirmed": false,
     "breakdown_volume_confirmed": false
   },
   "structure": {
     "close_vs_previous_20d_high_pct": -0.67,
     "close_vs_previous_20d_low_pct": 12.35,
-    "range_position_20d_pct": 94.19
+    "close_vs_previous_60d_high_pct": -5.2,
+    "close_vs_previous_60d_low_pct": 22.8,
+    "near_previous_20d_high": true,
+    "near_previous_20d_low": false,
+    "range_position_20d_pct": 94.19,
+    "range_position_60d_pct": 78.4
   },
   "liquidity": {
     "avg_20d_dollar_volume": 11610000000,
@@ -213,6 +226,8 @@ Possible `trend_strength` values:
 
 When `trend_score_max` is less than `5`, explicitly say the score is partial because not all long-term moving-average components were available.
 
+Partial trend labels should not be ranked directly against full-history labels without mentioning `trend_score_max`. For example, `partial_constructive` with `3/3` means all available components are positive, but it does not necessarily mean the setup is stronger than `constructive` with `4/5`.
+
 ### Moving-Average Distance
 
 Use `distance_from_sma_20_pct`, `distance_from_sma_50_pct`, and `distance_from_sma_200_pct` to explain proximity or extension. For example, "above the 20-day SMA" and "18% above the 20-day SMA" are very different technical setups.
@@ -222,6 +237,8 @@ If a distance field is `null`, the moving average was unavailable.
 ### Volume Confirmation
 
 Prefer `volume_ratio_vs_previous_20d` over `volume_ratio_vs_20d` when discussing breakout or breakdown quality because it excludes the latest candle from the baseline.
+
+`avg_20d_volume` is mainly general context and includes the latest candle. `previous_20d_avg_volume` excludes the latest candle and should be used for setup confirmation.
 
 Possible `volume_signal` values:
 
@@ -239,6 +256,8 @@ Possible `price_volume_confirmation` values:
 - `down_on_low_volume`
 - `flat_or_mixed`
 - `unknown`
+
+`price_volume_confirmation` compares the latest close with the previous close. It does not compare latest open-to-close intraday candle movement.
 
 Treat these labels as context, not buy/sell/hold signals.
 
@@ -290,6 +309,8 @@ Lower-liquidity names can have noisier technical signals and wider execution ris
 ### Gap
 
 Use `gap_pct`, `gap_direction`, and `large_gap` to discuss latest open-versus-previous-close context.
+
+Gap fields identify price gaps only. Use web search to explain why a gap occurred, such as earnings, company news, analyst actions, or macro events.
 
 Possible `gap_direction` values:
 
@@ -422,6 +443,8 @@ For detailed reasoning, prefer structured fields over technical_summary. Use tec
 Always mention the response as_of date, latest close, relevant warnings, and that the analysis is not financial advice. Do not claim the data is intraday or real time. Treat support/resistance and indicators as reference points, not guarantees.
 
 When comparing tickers, use trend_score, trend_score_max, trend_strength, volume confirmation, liquidity_tier, and range/breakout fields. If trend_score_max is less than 5, say the trend score is partial rather than treating missing data as bearish.
+
+Do not rank batch results solely by trend_score. Prefer a combined view: trend_score/trend_score_max, distance from SMAs, volume confirmation, breakout/structure, liquidity, and data_warnings.
 
 If a response has data_warnings, qualify the analysis. If batch results contain errors, explain which tickers succeeded and which failed. If the API returns market_data_auth_failed, say the backend market-data provider key or base URL needs to be checked; do not ask the user for POLYGON_API_KEY.
 
