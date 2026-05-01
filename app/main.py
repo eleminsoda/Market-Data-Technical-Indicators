@@ -243,7 +243,8 @@ def market_error_to_http_exception(error: Exception) -> HTTPException:
     summary="Get batch stock technicals",
     description=(
         "Returns RSI, MACD, Bollinger Bands, ATR, EMA crossover, moving averages, "
-        "volume, support/resistance, 52-week levels, recent candles, warnings, "
+        "trend score, volume confirmation, breakout, structure, liquidity, gap, "
+        "support/resistance, 52-week levels, recent candles, warnings, "
         "and summaries for stock tickers."
     ),
     responses=ERROR_RESPONSES,
@@ -293,7 +294,8 @@ async def get_batch_market_technicals(
     summary="Get stock technicals",
     description=(
         "Returns RSI, MACD, Bollinger Bands, ATR, EMA crossover, moving averages, "
-        "volume, support/resistance, 52-week levels, recent candles, warnings, "
+        "trend score, volume confirmation, breakout, structure, liquidity, gap, "
+        "support/resistance, 52-week levels, recent candles, warnings, "
         "and a summary for one stock ticker."
     ),
     responses=ERROR_RESPONSES,

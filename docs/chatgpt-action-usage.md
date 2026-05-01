@@ -83,12 +83,16 @@ Successful ticker responses include these top-level fields:
 - `not_financial_advice`: always `true`.
 - `technical_summary`: concise deterministic summary generated from the indicators.
 - `price`: latest close.
-- `trend`: moving-average trend state.
-- `moving_averages`: SMA and EMA values.
-- `volume`: latest and average volume context.
+- `trend`: moving-average trend state, trend score, and trend-strength label.
+- `moving_averages`: SMA/EMA values and percent distance from latest close to each SMA.
+- `volume`: latest volume, previous-20-day volume baseline, volume signal, and price-volume confirmation.
 - `momentum`: RSI, MACD, and short-term returns.
 - `volatility`: Bollinger Bands and ATR.
 - `levels`: 20-day support/resistance and 52-week levels when available.
+- `breakout`: prior 20/60-day high-low levels and close/intraday breakout or breakdown flags.
+- `structure`: latest close position versus previous 20/60-day ranges.
+- `liquidity`: 20-day dollar-volume context and liquidity tier.
+- `gap`: latest open versus previous close gap context.
 - `candles_tail`: last 10 daily OHLCV candles.
 
 Example abbreviated response:
@@ -112,14 +116,36 @@ Example abbreviated response:
     "above_50dma": true,
     "above_200dma": true,
     "ma_alignment": "bullish",
-    "ema_crossover": "none"
+    "ema_crossover": "none",
+    "trend_score": 5,
+    "trend_score_max": 5,
+    "trend_strength": "strong_uptrend",
+    "trend_score_components": {
+      "price_above_sma_20": true,
+      "price_above_sma_50": true,
+      "price_above_sma_200": true,
+      "sma_20_above_sma_50": true,
+      "sma_50_above_sma_200": true
+    }
   },
   "moving_averages": {
     "sma_20": 264.36,
     "sma_50": 260.69,
     "sma_200": 254.52,
     "ema_12": 267.99,
-    "ema_26": 264.28
+    "ema_26": 264.28,
+    "distance_from_sma_20_pct": 2.2,
+    "distance_from_sma_50_pct": 3.64,
+    "distance_from_sma_200_pct": 6.15
+  },
+  "volume": {
+    "latest_volume": 52000000,
+    "avg_20d_volume": 43000000,
+    "previous_20d_avg_volume": 41000000,
+    "volume_ratio_vs_20d": 1.21,
+    "volume_ratio_vs_previous_20d": 1.27,
+    "volume_signal": "above_average",
+    "price_volume_confirmation": "up_on_above_average_volume"
   },
   "momentum": {
     "rsi_14": 60.63,
@@ -138,9 +164,141 @@ Example abbreviated response:
     "bollinger_lower": 251.22,
     "bollinger_bandwidth_pct": 9.94,
     "bollinger_percent_b": 0.72
+  },
+  "breakout": {
+    "previous_20d_high": 272.0,
+    "previous_20d_low": 240.5,
+    "close_above_previous_20d_high": false,
+    "close_below_previous_20d_low": false,
+    "breakout_volume_confirmed": false,
+    "breakdown_volume_confirmed": false
+  },
+  "structure": {
+    "close_vs_previous_20d_high_pct": -0.67,
+    "close_vs_previous_20d_low_pct": 12.35,
+    "range_position_20d_pct": 94.19
+  },
+  "liquidity": {
+    "avg_20d_dollar_volume": 11610000000,
+    "liquidity_tier": "high"
+  },
+  "gap": {
+    "gap_pct": 0.42,
+    "gap_direction": "up",
+    "large_gap": false
   }
 }
 ```
+
+## Structured Field Reference
+
+Use these structured fields for detailed reasoning. Use `technical_summary` only as a quick overview.
+
+### Trend
+
+- `trend_score`: number of positive moving-average trend components.
+- `trend_score_max`: number of trend components that could be evaluated with available data.
+- `trend_strength`: compact trend label.
+- `trend_score_components`: raw boolean/null components behind the score.
+
+Possible `trend_strength` values:
+
+- `strong_uptrend`: all five trend components are positive.
+- `constructive`: three or four of five full-history components are positive.
+- `mixed_or_weak`: one or two of five full-history components are positive.
+- `bearish_or_broken`: no full-history components are positive.
+- `partial_constructive`: all available partial-history components are positive.
+- `partial_bearish_or_broken`: no available partial-history components are positive.
+- `unknown_or_partial`: insufficient or mixed partial-history components.
+
+When `trend_score_max` is less than `5`, explicitly say the score is partial because not all long-term moving-average components were available.
+
+### Moving-Average Distance
+
+Use `distance_from_sma_20_pct`, `distance_from_sma_50_pct`, and `distance_from_sma_200_pct` to explain proximity or extension. For example, "above the 20-day SMA" and "18% above the 20-day SMA" are very different technical setups.
+
+If a distance field is `null`, the moving average was unavailable.
+
+### Volume Confirmation
+
+Prefer `volume_ratio_vs_previous_20d` over `volume_ratio_vs_20d` when discussing breakout or breakdown quality because it excludes the latest candle from the baseline.
+
+Possible `volume_signal` values:
+
+- `very_high`: latest volume is at least 2.0x previous 20-day average volume.
+- `above_average`: latest volume is above 1.2x previous 20-day average volume.
+- `normal`: latest volume is between 0.8x and 1.2x previous 20-day average volume.
+- `below_average`: latest volume is below 0.8x previous 20-day average volume.
+- `unknown`: insufficient volume baseline.
+
+Possible `price_volume_confirmation` values:
+
+- `up_on_above_average_volume`
+- `up_on_low_volume`
+- `down_on_above_average_volume`
+- `down_on_low_volume`
+- `flat_or_mixed`
+- `unknown`
+
+Treat these labels as context, not buy/sell/hold signals.
+
+### Breakout And Breakdown
+
+Breakout and breakdown reference levels use prior candles only. The latest candle is excluded from `previous_20d_high`, `previous_20d_low`, `previous_60d_high`, and `previous_60d_low`.
+
+Use close-based fields as stronger evidence:
+
+- `close_above_previous_20d_high`
+- `close_above_previous_60d_high`
+- `close_below_previous_20d_low`
+- `close_below_previous_60d_low`
+
+Use intraday fields as weaker context if the close did not confirm:
+
+- `high_above_previous_20d_high`
+- `high_above_previous_60d_high`
+- `low_below_previous_20d_low`
+- `low_below_previous_60d_low`
+
+Use `breakout_volume_confirmed` and `breakdown_volume_confirmed` only as confirmation context. They require a close-based breakout or breakdown plus latest volume at least 1.3x the previous 20-day average volume.
+
+### Structure
+
+Use `range_position_20d_pct` and `range_position_60d_pct` to locate the latest close inside the previous range:
+
+- `0`: at the previous range low.
+- `50`: near the middle of the previous range.
+- `100`: at the previous range high.
+- Above `100`: closing breakout above the prior range.
+- Below `0`: closing breakdown below the prior range.
+
+Use `near_previous_20d_high` and `near_previous_20d_low` as quick proximity flags. They are based on a 3% threshold.
+
+### Liquidity
+
+Use `avg_20d_dollar_volume` and `liquidity_tier` to qualify signal reliability and execution context.
+
+Possible `liquidity_tier` values:
+
+- `high`: average 20-day dollar volume is at least 500M.
+- `medium`: average 20-day dollar volume is at least 50M and below 500M.
+- `low`: average 20-day dollar volume is below 50M.
+- `unknown`: insufficient data.
+
+Lower-liquidity names can have noisier technical signals and wider execution risk.
+
+### Gap
+
+Use `gap_pct`, `gap_direction`, and `large_gap` to discuss latest open-versus-previous-close context.
+
+Possible `gap_direction` values:
+
+- `up`
+- `down`
+- `none`
+- `unknown`
+
+`large_gap` is true when absolute `gap_pct` is at least 2%.
 
 ## How To Interpret Key Fields
 
@@ -157,6 +315,12 @@ Use `trend.ma_alignment` as a compact trend label:
 
 Use `trend.above_20dma`, `above_50dma`, and `above_200dma` to explain where price sits relative to major trend references.
 
+Use `trend.trend_score`, `trend.trend_score_max`, and `trend.trend_strength` for comparisons across tickers. If `trend_score_max` is below 5, explain that the score is partial because some moving-average components lacked enough history.
+
+Use `moving_averages.distance_from_sma_*_pct` to discuss whether price is near a moving average or extended from it. A small positive distance can mean constructive proximity; a very large positive distance can mean extension risk.
+
+Use `volume.volume_ratio_vs_previous_20d`, `volume.volume_signal`, and `volume.price_volume_confirmation` for setup quality. Prefer the previous-20-day baseline for breakout/breakdown confirmation because it excludes the latest candle.
+
 Use `momentum.rsi_14` cautiously:
 
 - Above 70 can suggest stretched or overbought conditions.
@@ -171,6 +335,14 @@ Use `volatility.atr_14` for recent average daily price movement. Use Bollinger f
 
 Use `levels.support_20d_low`, `levels.resistance_20d_high`, `high_52w`, and `low_52w` as reference levels, not guaranteed support or resistance.
 
+Use `breakout.close_above_previous_20d_high` and `breakout.close_above_previous_60d_high` for closing breakouts. Intraday high flags are weaker if the close did not also confirm. Treat `breakout_volume_confirmed` and `breakdown_volume_confirmed` as setup context, not a trade signal.
+
+Use `structure.range_position_20d_pct` and `range_position_60d_pct` to explain whether the latest close is near the bottom, middle, or top of recent ranges. Values above 100 or below 0 can occur during breakouts or breakdowns.
+
+Use `liquidity.liquidity_tier` to qualify thinly traded names. Lower-liquidity tickers may have less reliable technical signals and wider execution risk.
+
+Use `gap.gap_pct`, `gap_direction`, and `large_gap` to explain latest open-versus-previous-close context.
+
 Use `candles_tail` when the user asks for recent price action, recent candles, or exact recent OHLCV values.
 
 ## Recommended Answer Pattern
@@ -178,18 +350,20 @@ Use `candles_tail` when the user asks for recent price action, recent candles, o
 When responding to the user after calling the Action:
 
 1. State the ticker, `as_of` date, and latest close.
-2. Summarize the trend using moving averages and `ma_alignment`.
+2. Summarize the trend using `ma_alignment`, `trend_score`, `trend_strength`, and distance from SMAs.
 3. Summarize momentum using RSI, MACD, and recent returns.
-4. Summarize volatility using ATR and Bollinger Bands.
-5. Mention key support/resistance or 52-week levels when relevant.
-6. Mention any `data_warnings`.
-7. Add that the output is technical-analysis context, not financial advice.
-8. If the question asks for news, catalysts, valuation, or fundamentals, combine this Action with web search and clearly separate technical data from external context.
+4. Summarize volume confirmation, especially for breakouts or breakdowns.
+5. Summarize volatility using ATR and Bollinger Bands.
+6. Mention breakout/structure, key support/resistance, or 52-week levels when relevant.
+7. Mention liquidity and gap context when they affect interpretation.
+8. Mention any `data_warnings`.
+9. Add that the output is technical-analysis context, not financial advice.
+10. If the question asks for news, catalysts, valuation, or fundamentals, combine this Action with web search and clearly separate technical data from external context.
 
 Example phrasing:
 
 ```text
-As of 2026-04-29, AAPL closed at 270.17. The technical trend is bullish: price is above the 20-, 50-, and 200-day SMAs, and MACD momentum is positive. RSI is 60.63, which is constructive but not overbought. ATR(14) is 5.57, so recent daily movement has been meaningful. Key 20-day reference levels are ...
+As of 2026-04-29, AAPL closed at 270.17. The technical trend is bullish with a 5/5 trend score and strong_uptrend label. Price is above the 20-, 50-, and 200-day SMAs, and it is 2.2% above the 20-day SMA, so it is not extremely extended from that short-term reference. RSI is 60.63 and MACD momentum is positive. Volume confirmation is up_on_above_average_volume. ATR(14) is 5.57, so recent daily movement has been meaningful. The close is near the upper part of its prior 20-day range, but there is no confirmed closing breakout.
 
 This is technical-analysis context only, not financial advice.
 ```
@@ -241,9 +415,13 @@ You have access to the Market Technical API Action for deterministic daily stock
 
 Use getStockTechnicals for one ticker and getBatchStockTechnicals for 2 to 10 tickers. The default days value is 450; only request 80 to 1000 days. Use batch requests for comparisons or watchlists.
 
-Use this Action for technical indicators, recent daily candles, trend state, volatility, support/resistance references, and structured market-data summaries. Use web search for news, earnings, macro context, fundamentals, and qualitative context. Clearly separate Action-derived technical data from web/news context.
+Use this Action for technical indicators, recent daily candles, trend state, trend scores, moving-average distance, volume confirmation, breakout/breakdown state, range structure, liquidity, gap context, volatility, support/resistance references, and structured market-data summaries. Use web search for news, earnings, macro context, fundamentals, and qualitative context. Clearly separate Action-derived technical data from web/news context.
+
+For detailed reasoning, prefer structured fields over technical_summary. Use technical_summary as a quick overview, then base analysis on trend, moving_averages, volume, momentum, volatility, levels, breakout, structure, liquidity, gap, candles_tail, and data_warnings.
 
 Always mention the response as_of date, latest close, relevant warnings, and that the analysis is not financial advice. Do not claim the data is intraday or real time. Treat support/resistance and indicators as reference points, not guarantees.
+
+When comparing tickers, use trend_score, trend_score_max, trend_strength, volume confirmation, liquidity_tier, and range/breakout fields. If trend_score_max is less than 5, say the trend score is partial rather than treating missing data as bearish.
 
 If a response has data_warnings, qualify the analysis. If batch results contain errors, explain which tickers succeeded and which failed. If the API returns market_data_auth_failed, say the backend market-data provider key or base URL needs to be checked; do not ask the user for POLYGON_API_KEY.
 

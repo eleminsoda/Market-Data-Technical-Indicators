@@ -84,6 +84,21 @@ def test_openapi_documents_structured_error_responses():
         )
 
 
+def test_openapi_includes_descriptions_for_new_action_fields():
+    schema = main.app.openapi()
+
+    assert schema["components"]["schemas"]["Breakout"]["properties"]["previous_20d_high"][
+        "description"
+    ]
+    assert schema["components"]["schemas"]["Structure"]["properties"]["range_position_20d_pct"][
+        "description"
+    ]
+    assert schema["components"]["schemas"]["Liquidity"]["properties"]["liquidity_tier"][
+        "description"
+    ]
+    assert schema["components"]["schemas"]["Gap"]["properties"]["gap_pct"]["description"]
+
+
 def test_get_market_technicals_returns_gpt_friendly_payload(client_without_auth, monkeypatch):
     install_fake_bars(monkeypatch, cache_hit=True)
 
@@ -97,6 +112,13 @@ def test_get_market_technicals_returns_gpt_friendly_payload(client_without_auth,
     assert body["not_financial_advice"] is True
     assert len(body["candles_tail"]) == 10
     assert body["volatility"]["atr_14"] is not None
+    assert body["trend"]["trend_score"] == 5
+    assert body["moving_averages"]["distance_from_sma_20_pct"] is not None
+    assert body["volume"]["volume_signal"] in {"normal", "above_average", "very_high"}
+    assert body["breakout"]["previous_20d_high"] is not None
+    assert body["structure"]["range_position_20d_pct"] is not None
+    assert body["liquidity"]["liquidity_tier"] in {"high", "medium", "low", "unknown"}
+    assert body["gap"]["gap_direction"] in {"up", "down", "none", "unknown"}
     assert "Technical trend is" in body["technical_summary"]
 
 
@@ -175,6 +197,10 @@ def test_batch_returns_partial_failures(client_without_auth, monkeypatch):
     assert body["requested_count"] == 2
     assert body["returned_count"] == 1
     assert [result["ticker"] for result in body["results"]] == ["AAPL"]
+    assert "breakout" in body["results"][0]
+    assert "structure" in body["results"][0]
+    assert "liquidity" in body["results"][0]
+    assert "gap" in body["results"][0]
     assert body["errors"] == [
         {
             "ticker": "MISSING",

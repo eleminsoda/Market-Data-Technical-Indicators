@@ -139,6 +139,133 @@ def round_or_none(value, digits: int = 2):
     return round(float(value), digits)
 
 
+def pct_distance(value: float | None, reference: float | None) -> float | None:
+    if value is None or reference is None or reference == 0:
+        return None
+
+    return round_or_none((value / reference - 1) * 100)
+
+
+def range_position_pct(value: float, low: float | None, high: float | None) -> float | None:
+    if low is None or high is None or high == low:
+        return None
+
+    return round_or_none(((value - low) / (high - low)) * 100)
+
+
+def build_trend_score_components(
+    price: float,
+    sma_20: float | None,
+    sma_50: float | None,
+    sma_200: float | None,
+) -> dict[str, bool | None]:
+    return {
+        "price_above_sma_20": None if sma_20 is None else price > sma_20,
+        "price_above_sma_50": None if sma_50 is None else price > sma_50,
+        "price_above_sma_200": None if sma_200 is None else price > sma_200,
+        "sma_20_above_sma_50": None if sma_20 is None or sma_50 is None else sma_20 > sma_50,
+        "sma_50_above_sma_200": None if sma_50 is None or sma_200 is None else sma_50 > sma_200,
+    }
+
+
+def classify_trend_strength(
+    trend_score: int,
+    trend_score_max: int,
+) -> Literal[
+    "strong_uptrend",
+    "constructive",
+    "mixed_or_weak",
+    "bearish_or_broken",
+    "partial_constructive",
+    "partial_bearish_or_broken",
+    "unknown_or_partial",
+]:
+    if trend_score_max < 5:
+        if trend_score_max == 0:
+            return "unknown_or_partial"
+        if trend_score == trend_score_max:
+            return "partial_constructive"
+        if trend_score == 0:
+            return "partial_bearish_or_broken"
+        return "unknown_or_partial"
+
+    if trend_score == 5:
+        return "strong_uptrend"
+    if trend_score >= 3:
+        return "constructive"
+    if trend_score >= 1:
+        return "mixed_or_weak"
+    return "bearish_or_broken"
+
+
+def classify_volume_signal(
+    volume_ratio: float | None,
+) -> Literal["very_high", "above_average", "normal", "below_average", "unknown"]:
+    if volume_ratio is None:
+        return "unknown"
+    if volume_ratio >= 2.0:
+        return "very_high"
+    if volume_ratio > 1.2:
+        return "above_average"
+    if volume_ratio < 0.8:
+        return "below_average"
+    return "normal"
+
+
+def classify_price_volume_confirmation(
+    latest_close: float,
+    previous_close: float | None,
+    volume_signal: str,
+) -> Literal[
+    "up_on_above_average_volume",
+    "up_on_low_volume",
+    "down_on_above_average_volume",
+    "down_on_low_volume",
+    "flat_or_mixed",
+    "unknown",
+]:
+    if previous_close is None or volume_signal == "unknown":
+        return "unknown"
+
+    if latest_close > previous_close:
+        if volume_signal in {"above_average", "very_high"}:
+            return "up_on_above_average_volume"
+        if volume_signal == "below_average":
+            return "up_on_low_volume"
+        return "flat_or_mixed"
+
+    if latest_close < previous_close:
+        if volume_signal in {"above_average", "very_high"}:
+            return "down_on_above_average_volume"
+        if volume_signal == "below_average":
+            return "down_on_low_volume"
+        return "flat_or_mixed"
+
+    return "flat_or_mixed"
+
+
+def classify_liquidity_tier(
+    avg_20d_dollar_volume: float | None,
+) -> Literal["high", "medium", "low", "unknown"]:
+    if avg_20d_dollar_volume is None:
+        return "unknown"
+    if avg_20d_dollar_volume >= 500_000_000:
+        return "high"
+    if avg_20d_dollar_volume >= 50_000_000:
+        return "medium"
+    return "low"
+
+
+def classify_gap_direction(gap_pct: float | None) -> Literal["up", "down", "none", "unknown"]:
+    if gap_pct is None:
+        return "unknown"
+    if gap_pct > 0:
+        return "up"
+    if gap_pct < 0:
+        return "down"
+    return "none"
+
+
 def build_technical_summary(df: pd.DataFrame) -> dict:
     if df.empty or len(df) < 50:
         raise ValueError("Not enough market data to compute technicals")
@@ -177,6 +304,10 @@ def build_technical_summary(df: pd.DataFrame) -> dict:
     latest = df.iloc[-1]
 
     price = float(latest["close"])
+    latest_open = float(latest["open"])
+    latest_high = float(latest["high"])
+    latest_low = float(latest["low"])
+    previous_close = float(close.iloc[-2]) if len(close) >= 2 else None
     sma_20 = round_or_none(latest["sma_20"])
     sma_50 = round_or_none(latest["sma_50"])
     sma_200 = round_or_none(latest["sma_200"])
@@ -184,8 +315,18 @@ def build_technical_summary(df: pd.DataFrame) -> dict:
     ema_26 = round_or_none(latest["ema_26"])
 
     avg_20d_volume = volume.rolling(20).mean().iloc[-1]
+    previous_20d_avg_volume = volume.shift(1).rolling(20).mean().iloc[-1]
     latest_volume = float(latest["volume"])
     volume_ratio = latest_volume / avg_20d_volume if avg_20d_volume else None
+    volume_ratio_vs_previous_20d = (
+        latest_volume / previous_20d_avg_volume if previous_20d_avg_volume else None
+    )
+    volume_signal = classify_volume_signal(round_or_none(volume_ratio_vs_previous_20d))
+    price_volume_confirmation = classify_price_volume_confirmation(
+        latest_close=price,
+        previous_close=previous_close,
+        volume_signal=volume_signal,
+    )
 
     recent_20 = df.tail(20)
     recent_60 = df.tail(60)
@@ -209,6 +350,11 @@ def build_technical_summary(df: pd.DataFrame) -> dict:
             "Fewer than 200 trading bars returned; SMA 200 and related trend fields are unavailable."
         )
 
+    if bars_returned < 61:
+        data_warnings.append(
+            "Fewer than 61 trading bars returned; 60-day breakout and structure fields are unavailable."
+        )
+
     ma_alignment = "unknown"
     if sma_20 and sma_50 and sma_200:
         if price > sma_20 > sma_50 > sma_200:
@@ -226,6 +372,40 @@ def build_technical_summary(df: pd.DataFrame) -> dict:
 
     ema_crossover = detect_latest_ema_crossover(close, 12, 26)
 
+    trend_score_components = build_trend_score_components(price, sma_20, sma_50, sma_200)
+    evaluable_trend_components = [
+        component for component in trend_score_components.values() if component is not None
+    ]
+    trend_score = sum(1 for component in evaluable_trend_components if component)
+    trend_score_max = len(evaluable_trend_components)
+    trend_strength = classify_trend_strength(trend_score, trend_score_max)
+
+    previous_20d_high = round_or_none(high.shift(1).rolling(20).max().iloc[-1])
+    previous_20d_low = round_or_none(low.shift(1).rolling(20).min().iloc[-1])
+    previous_60d_high = round_or_none(high.shift(1).rolling(60).max().iloc[-1])
+    previous_60d_low = round_or_none(low.shift(1).rolling(60).min().iloc[-1])
+
+    close_above_previous_20d_high = (
+        None if previous_20d_high is None else price > previous_20d_high
+    )
+    close_above_previous_60d_high = (
+        None if previous_60d_high is None else price > previous_60d_high
+    )
+    close_below_previous_20d_low = (
+        None if previous_20d_low is None else price < previous_20d_low
+    )
+    close_below_previous_60d_low = (
+        None if previous_60d_low is None else price < previous_60d_low
+    )
+    volume_confirmed = (
+        volume_ratio_vs_previous_20d is not None and volume_ratio_vs_previous_20d >= 1.3
+    )
+
+    avg_20d_dollar_volume = (
+        float(avg_20d_volume) * price if not pd.isna(avg_20d_volume) and avg_20d_volume else None
+    )
+    gap_pct = pct_distance(latest_open, previous_close)
+
     summary = {
         "as_of": str(latest["date"]),
         "bars_returned": bars_returned,
@@ -237,6 +417,10 @@ def build_technical_summary(df: pd.DataFrame) -> dict:
             "above_200dma": bool(sma_200 and price > sma_200),
             "ma_alignment": ma_alignment,
             "ema_crossover": ema_crossover,
+            "trend_score": trend_score,
+            "trend_score_max": trend_score_max,
+            "trend_strength": trend_strength,
+            "trend_score_components": trend_score_components,
         },
         "moving_averages": {
             "sma_20": sma_20,
@@ -244,11 +428,18 @@ def build_technical_summary(df: pd.DataFrame) -> dict:
             "sma_200": sma_200,
             "ema_12": ema_12,
             "ema_26": ema_26,
+            "distance_from_sma_20_pct": pct_distance(price, sma_20),
+            "distance_from_sma_50_pct": pct_distance(price, sma_50),
+            "distance_from_sma_200_pct": pct_distance(price, sma_200),
         },
         "volume": {
             "latest_volume": round_or_none(latest_volume, 0),
             "avg_20d_volume": round_or_none(avg_20d_volume, 0),
+            "previous_20d_avg_volume": round_or_none(previous_20d_avg_volume, 0),
             "volume_ratio_vs_20d": round_or_none(volume_ratio),
+            "volume_ratio_vs_previous_20d": round_or_none(volume_ratio_vs_previous_20d),
+            "volume_signal": volume_signal,
+            "price_volume_confirmation": price_volume_confirmation,
         },
         "momentum": {
             "rsi_14": round_or_none(latest["rsi_14"]),
@@ -279,6 +470,69 @@ def build_technical_summary(df: pd.DataFrame) -> dict:
             "distance_from_52w_low_pct": round_or_none(
                 (price / low_52w - 1) * 100 if low_52w else None
             ),
+        },
+        "breakout": {
+            "previous_20d_high": previous_20d_high,
+            "previous_20d_low": previous_20d_low,
+            "previous_60d_high": previous_60d_high,
+            "previous_60d_low": previous_60d_low,
+            "high_above_previous_20d_high": (
+                None if previous_20d_high is None else latest_high > previous_20d_high
+            ),
+            "close_above_previous_20d_high": close_above_previous_20d_high,
+            "low_below_previous_20d_low": (
+                None if previous_20d_low is None else latest_low < previous_20d_low
+            ),
+            "close_below_previous_20d_low": close_below_previous_20d_low,
+            "high_above_previous_60d_high": (
+                None if previous_60d_high is None else latest_high > previous_60d_high
+            ),
+            "close_above_previous_60d_high": close_above_previous_60d_high,
+            "low_below_previous_60d_low": (
+                None if previous_60d_low is None else latest_low < previous_60d_low
+            ),
+            "close_below_previous_60d_low": close_below_previous_60d_low,
+            "breakout_volume_confirmed": bool(
+                volume_confirmed
+                and (close_above_previous_20d_high or close_above_previous_60d_high)
+            ),
+            "breakdown_volume_confirmed": bool(
+                volume_confirmed
+                and (close_below_previous_20d_low or close_below_previous_60d_low)
+            ),
+        },
+        "structure": {
+            "close_vs_previous_20d_high_pct": pct_distance(price, previous_20d_high),
+            "close_vs_previous_20d_low_pct": pct_distance(price, previous_20d_low),
+            "close_vs_previous_60d_high_pct": pct_distance(price, previous_60d_high),
+            "close_vs_previous_60d_low_pct": pct_distance(price, previous_60d_low),
+            "near_previous_20d_high": (
+                None
+                if previous_20d_high is None
+                else abs((price / previous_20d_high - 1) * 100) <= 3
+            ),
+            "near_previous_20d_low": (
+                None if previous_20d_low is None else abs((price / previous_20d_low - 1) * 100) <= 3
+            ),
+            "range_position_20d_pct": range_position_pct(
+                price,
+                previous_20d_low,
+                previous_20d_high,
+            ),
+            "range_position_60d_pct": range_position_pct(
+                price,
+                previous_60d_low,
+                previous_60d_high,
+            ),
+        },
+        "liquidity": {
+            "avg_20d_dollar_volume": round_or_none(avg_20d_dollar_volume, 0),
+            "liquidity_tier": classify_liquidity_tier(avg_20d_dollar_volume),
+        },
+        "gap": {
+            "gap_pct": gap_pct,
+            "gap_direction": classify_gap_direction(gap_pct),
+            "large_gap": None if gap_pct is None else abs(gap_pct) >= 2.0,
         },
         "candles_tail": [
             {

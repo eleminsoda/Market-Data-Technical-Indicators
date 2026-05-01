@@ -57,10 +57,14 @@ uvicorn app.main:app --reload --port 8000
 Responses include:
 
 - Trend: price position vs 20/50/200-day SMAs, moving-average alignment, latest EMA crossover.
-- Moving averages: SMA 20/50/200 and EMA 12/26.
+- Trend score: available moving-average components, maximum evaluable components, and trend-strength label.
+- Moving averages: SMA 20/50/200, EMA 12/26, and percent distance from latest close to each SMA.
 - Momentum: RSI 14, MACD/signal/histogram, MACD signal text, 5/20/60-day returns.
+- Volume confirmation: latest volume, 20-day average volume, previous-20-day volume baseline, volume signal, and price-volume confirmation.
 - Volatility: Bollinger Bands, Bollinger bandwidth, Bollinger percent B, and ATR 14.
 - Levels: 20-day support/resistance and 52-week high/low metrics when enough history is available.
+- Breakout and structure: prior 20/60-day high-low ranges, close/intraday breakout or breakdown flags, and range-position percentages.
+- Liquidity and gap: 20-day dollar-volume tier and latest open versus previous close gap context.
 - Recent candles: last 10 daily OHLCV bars.
 - Metadata: source, adjusted flag, lookback days, bars returned, cache hit, warnings, and non-advice flag.
 
@@ -114,7 +118,7 @@ Identical market-data requests are cached in memory for 5 minutes by default. Th
 pytest
 ```
 
-The test suite covers RSI, MACD, returns, rounding, Bollinger Bands, ATR, EMA crossover detection, dataframe conversion, summary generation, endpoint validation, auth failures, upstream error mapping, batch partial failures, and cache hits.
+The test suite covers RSI, MACD, returns, rounding, Bollinger Bands, ATR, EMA crossover detection, dataframe conversion, summary generation, endpoint validation, auth failures, upstream error mapping, batch partial failures, cache hits, trend scoring, breakout/breakdown detection, volume confirmation, liquidity, and gap fields.
 
 ## Safety notes
 

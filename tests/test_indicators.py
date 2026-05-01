@@ -259,12 +259,107 @@ def test_build_technical_summary_marks_bullish_moving_average_alignment_for_uptr
     summary = build_technical_summary(make_ohlcv_frame())
 
     assert summary["trend"]["ma_alignment"] == "bullish"
+    assert summary["trend"]["trend_score"] == 5
+    assert summary["trend"]["trend_score_max"] == 5
+    assert summary["trend"]["trend_strength"] == "strong_uptrend"
+    assert summary["trend"]["trend_score_components"] == {
+        "price_above_sma_20": True,
+        "price_above_sma_50": True,
+        "price_above_sma_200": True,
+        "sma_20_above_sma_50": True,
+        "sma_50_above_sma_200": True,
+    }
+
+
+def test_build_technical_summary_includes_distance_from_moving_average_fields():
+    summary = build_technical_summary(make_ohlcv_frame())
+
+    assert summary["moving_averages"]["distance_from_sma_20_pct"] == 2.72
+    assert summary["moving_averages"]["distance_from_sma_50_pct"] == 7.32
+    assert summary["moving_averages"]["distance_from_sma_200_pct"] == 38.34
 
 
 def test_build_technical_summary_warns_when_52_week_history_is_unavailable():
     summary = build_technical_summary(make_ohlcv_frame(rows=100))
 
     assert "52-week high/low metrics are unavailable" in summary["data_warnings"][0]
+
+
+def test_build_technical_summary_uses_partial_trend_score_when_sma_200_is_unavailable():
+    summary = build_technical_summary(make_ohlcv_frame(rows=100))
+
+    assert summary["trend"]["trend_score"] == 3
+    assert summary["trend"]["trend_score_max"] == 3
+    assert summary["trend"]["trend_strength"] == "partial_constructive"
+    assert summary["trend"]["trend_score_components"]["price_above_sma_200"] is None
+    assert summary["trend"]["trend_score_components"]["sma_50_above_sma_200"] is None
+    assert summary["moving_averages"]["distance_from_sma_200_pct"] is None
+
+
+def test_build_technical_summary_detects_close_breakout_against_previous_range():
+    df = make_ohlcv_frame(rows=80, step=0)
+    df["volume"] = 1_000.0
+    df.loc[df.index[-1], ["open", "high", "low", "close", "volume"]] = [
+        102.0,
+        106.0,
+        101.0,
+        105.0,
+        2_000.0,
+    ]
+
+    summary = build_technical_summary(df)
+
+    assert summary["breakout"]["previous_20d_high"] == 101.0
+    assert summary["breakout"]["high_above_previous_20d_high"] is True
+    assert summary["breakout"]["close_above_previous_20d_high"] is True
+    assert summary["breakout"]["breakout_volume_confirmed"] is True
+    assert summary["volume"]["previous_20d_avg_volume"] == 1000.0
+    assert summary["volume"]["volume_ratio_vs_previous_20d"] == 2.0
+    assert summary["volume"]["volume_signal"] == "very_high"
+    assert summary["volume"]["price_volume_confirmation"] == "up_on_above_average_volume"
+    assert summary["structure"]["close_vs_previous_20d_high_pct"] == 3.96
+    assert summary["structure"]["range_position_20d_pct"] == 300.0
+
+
+def test_build_technical_summary_detects_close_breakdown_against_previous_range():
+    df = make_ohlcv_frame(rows=80, step=0)
+    df["volume"] = 1_000.0
+    df.loc[df.index[-1], ["open", "high", "low", "close", "volume"]] = [
+        98.0,
+        99.0,
+        94.0,
+        95.0,
+        2_000.0,
+    ]
+
+    summary = build_technical_summary(df)
+
+    assert summary["breakout"]["previous_20d_low"] == 99.0
+    assert summary["breakout"]["low_below_previous_20d_low"] is True
+    assert summary["breakout"]["close_below_previous_20d_low"] is True
+    assert summary["breakout"]["breakdown_volume_confirmed"] is True
+    assert summary["volume"]["price_volume_confirmation"] == "down_on_above_average_volume"
+    assert summary["structure"]["close_vs_previous_20d_low_pct"] == -4.04
+    assert summary["structure"]["range_position_20d_pct"] == -200.0
+
+
+def test_build_technical_summary_includes_liquidity_and_gap_fields():
+    df = make_ohlcv_frame(rows=80, step=0)
+    df["volume"] = 1_000_000.0
+    df.loc[df.index[-2], "close"] = 100.0
+    df.loc[df.index[-1], ["open", "high", "low", "close"]] = [103.0, 105.0, 102.0, 104.0]
+
+    summary = build_technical_summary(df)
+
+    assert summary["liquidity"] == {
+        "avg_20d_dollar_volume": 104_000_000.0,
+        "liquidity_tier": "medium",
+    }
+    assert summary["gap"] == {
+        "gap_pct": 3.0,
+        "gap_direction": "up",
+        "large_gap": True,
+    }
 
 
 def test_build_summary_text_mentions_new_ema_and_atr_signals():
