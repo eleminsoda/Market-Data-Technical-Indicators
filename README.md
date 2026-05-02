@@ -32,12 +32,22 @@ POLYGON_BASE_URL=https://api.massive.com
 MARKET_CACHE_TTL_SECONDS=300
 ```
 
-`API_KEY` is optional for local development. If set, callers must send it as `X-API-Key`.
-`ACTION_API_KEY` is also supported for backward compatibility.
+`API_KEY` is the optional API key for callers of this backend. If set, callers must send the same value as the `X-API-Key` header.
+`ACTION_API_KEY` is also supported as an alias for backward compatibility.
 `POLYGON_BASE_URL` defaults to Massive's API host. `https://api.polygon.io` remains configurable for backward compatibility.
 `MARKET_CACHE_TTL_SECONDS` defaults to 300 seconds.
 
-For public deployments, set `API_KEY` and configure GPT Action authentication to send it as the `X-API-Key` header. Keep `POLYGON_API_KEY` server-side only; callers should never receive the market-data provider key.
+For public deployments, set `API_KEY` and configure GPT Action authentication to send that exact value as the `X-API-Key` header. Keep `POLYGON_API_KEY` server-side only; callers should never receive the market-data provider key.
+
+Request flow:
+
+```text
+Caller / GPT Action
+  -- X-API-Key: API_KEY -->
+This FastAPI backend
+  -- apiKey=POLYGON_API_KEY -->
+Polygon/Massive
+```
 
 ## Run
 
@@ -111,6 +121,10 @@ The OpenAPI schema documents structured responses for `400`, `403`, `404`, `422`
 ## Caching
 
 Identical market-data requests are cached in memory for 5 minutes by default. This reduces repeated Polygon.io calls during GPT Action retries or follow-up questions. The cache is process-local and resets when the server restarts.
+
+## Logging
+
+Each request logs a structured line with request ID, method, path, ticker context, status code, latency, cache hit, and error type. API keys are never logged. The response includes an `X-Request-ID` header for correlating client reports with server logs.
 
 ## Tests
 

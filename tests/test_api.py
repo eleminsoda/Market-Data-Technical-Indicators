@@ -1,4 +1,5 @@
 import os
+import logging
 
 import httpx
 import pytest
@@ -70,7 +71,8 @@ def test_health_endpoint_returns_ok():
         response = client.get("/health")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    assert response.json() == {"status": "ok", "version": main.APP_VERSION}
+    assert response.headers["X-Request-ID"]
 
 
 def test_openapi_documents_structured_error_responses():
@@ -147,6 +149,38 @@ def test_action_api_key_blocks_missing_header(monkeypatch):
         "status_code": 403,
         "retryable": False,
     }
+
+
+def test_action_api_key_allows_matching_header(monkeypatch):
+    monkeypatch.setattr(main.settings, "action_api_key", "secret")
+    install_fake_bars(monkeypatch)
+
+    with TestClient(main.app) as client:
+        response = client.get(
+            "/v1/market/technicals/AAPL?days=450",
+            headers={"X-API-Key": "secret"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["ticker"] == "AAPL"
+
+
+def test_request_logging_omits_api_keys(caplog, monkeypatch):
+    monkeypatch.setattr(main.settings, "action_api_key", "secret")
+
+    with caplog.at_level(logging.INFO, logger="market_technical_api"):
+        with TestClient(main.app) as client:
+            response = client.get(
+                "/v1/market/technicals/AAPL?days=450",
+                headers={"X-API-Key": "wrong-secret"},
+            )
+
+    assert response.status_code == 403
+    log_text = "\n".join(record.getMessage() for record in caplog.records)
+    assert '"request_id"' in log_text
+    assert '"path":"/v1/market/technicals/AAPL"' in log_text
+    assert "wrong-secret" not in log_text
+    assert "secret" not in log_text
 
 
 def test_upstream_auth_failure_returns_debuggable_error(client_without_auth, monkeypatch):

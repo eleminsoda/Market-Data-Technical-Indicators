@@ -1,7 +1,12 @@
+import json
+import logging
+import time
+from datetime import UTC, datetime
 from typing import Annotated, Any
+from uuid import uuid4
 
 import httpx
-from fastapi import Depends, FastAPI, Header, HTTPException, Path, Query, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Path, Query, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
@@ -11,11 +16,13 @@ from app.polygon_client import get_daily_bars
 from app.schemas import ErrorResponse, TechnicalBatchRequest, TechnicalBatchResponse, TechnicalResponse
 
 
+APP_VERSION = "0.1.0"
 HTTP_422_UNPROCESSABLE_ENTITY = 422
+logger = logging.getLogger("market_technical_api")
 
 app = FastAPI(
     title="Market Technical API",
-    version="0.1.0",
+    version=APP_VERSION,
     description="Market technical analysis API for GPT-powered trading research.",
 )
 
@@ -30,6 +37,52 @@ ERROR_RESPONSES = {
     502: {"model": ErrorResponse, "description": "Market data provider returned an upstream error."},
     504: {"model": ErrorResponse, "description": "Market data provider request timed out."},
 }
+
+
+def set_request_log_context(request: Request, **context: Any) -> None:
+    current_context = getattr(request.state, "log_context", {})
+    current_context.update({key: value for key, value in context.items() if value is not None})
+    request.state.log_context = current_context
+
+
+@app.middleware("http")
+async def request_logging_middleware(request: Request, call_next):
+    request_id = request.headers.get("X-Request-ID") or str(uuid4())
+    request.state.request_id = request_id
+    request.state.log_context = {}
+
+    start = time.perf_counter()
+    status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+    error_type = None
+
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        response.headers["X-Request-ID"] = request_id
+        return response
+    except Exception as error:
+        error_type = type(error).__name__
+        raise
+    finally:
+        context = getattr(request.state, "log_context", {})
+        if error_type is None:
+            error_type = context.get("error_type")
+        if error_type is None and status_code >= 400:
+            error_type = "http_error"
+
+        log_payload = {
+            "timestamp": datetime.now(UTC).isoformat(),
+            "request_id": request_id,
+            "method": request.method,
+            "path": request.url.path,
+            "ticker_or_tickers": context.get("ticker_or_tickers"),
+            "ticker_count": context.get("ticker_count"),
+            "status_code": status_code,
+            "latency_ms": round((time.perf_counter() - start) * 1000, 2),
+            "cache_hit": context.get("cache_hit"),
+            "error_type": error_type,
+        }
+        logger.info(json.dumps(log_payload, separators=(",", ":")))
 
 
 def build_error_payload(
@@ -76,16 +129,18 @@ def http_exception_to_error_payload(error: HTTPException) -> dict[str, Any]:
 
 
 @app.exception_handler(HTTPException)
-async def http_exception_handler(_, error: HTTPException):
+async def http_exception_handler(request: Request, error: HTTPException):
+    error_payload = http_exception_to_error_payload(error)
+    set_request_log_context(request, error_type=error_payload["error"])
     return JSONResponse(
         status_code=error.status_code,
-        content=http_exception_to_error_payload(error),
+        content=error_payload,
         headers=error.headers,
     )
 
 
 @app.exception_handler(RequestValidationError)
-async def request_validation_exception_handler(_, error: RequestValidationError):
+async def request_validation_exception_handler(request: Request, error: RequestValidationError):
     errors = error.errors()
     first_error = errors[0] if errors else {}
     location = ".".join(str(part) for part in first_error.get("loc", []))
@@ -99,6 +154,7 @@ async def request_validation_exception_handler(_, error: RequestValidationError)
     if len(errors) > 1:
         message = f"{message} ({len(errors)} validation errors total)"
 
+    set_request_log_context(request, error_type="invalid_request")
     return JSONResponse(
         status_code=HTTP_422_UNPROCESSABLE_ENTITY,
         content=build_error_payload(
@@ -111,7 +167,8 @@ async def request_validation_exception_handler(_, error: RequestValidationError)
 
 
 @app.exception_handler(Exception)
-async def unhandled_exception_handler(_, error: Exception):
+async def unhandled_exception_handler(request: Request, error: Exception):
+    set_request_log_context(request, error_type="internal_error")
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content=build_error_payload(
@@ -125,7 +182,7 @@ async def unhandled_exception_handler(_, error: Exception):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    return {"status": "ok", "version": APP_VERSION}
 
 
 async def verify_action_api_key(
@@ -250,14 +307,21 @@ def market_error_to_http_exception(error: Exception) -> HTTPException:
     responses=ERROR_RESPONSES,
 )
 async def get_batch_market_technicals(
-    request: TechnicalBatchRequest,
+    batch_request: TechnicalBatchRequest,
+    request: Request,
     _: None = Depends(verify_action_api_key),
 ):
     results = []
     errors = []
     seen_tickers = set()
+    requested_tickers = [ticker.strip().upper() for ticker in batch_request.tickers]
+    set_request_log_context(
+        request,
+        ticker_or_tickers=requested_tickers,
+        ticker_count=len(requested_tickers),
+    )
 
-    for ticker in request.tickers:
+    for ticker in batch_request.tickers:
         normalized_ticker = ticker.strip().upper()
         if normalized_ticker in seen_tickers:
             continue
@@ -267,7 +331,7 @@ async def get_batch_market_technicals(
             results.append(
                 await build_market_technicals_response(
                     ticker=normalized_ticker,
-                    days=request.days,
+                    days=batch_request.days,
                 )
             )
         except Exception as error:
@@ -280,7 +344,7 @@ async def get_batch_market_technicals(
             )
 
     return {
-        "requested_count": len(request.tickers),
+        "requested_count": len(batch_request.tickers),
         "returned_count": len(results),
         "results": results,
         "errors": errors,
@@ -301,6 +365,7 @@ async def get_batch_market_technicals(
     responses=ERROR_RESPONSES,
 )
 async def get_market_technicals(
+    request: Request,
     ticker: str = Path(description="Stock ticker to analyze."),
     days: int = Query(
         default=450,
@@ -310,7 +375,10 @@ async def get_market_technicals(
     ),
     _: None = Depends(verify_action_api_key),
 ):
+    set_request_log_context(request, ticker_or_tickers=ticker.strip().upper())
     try:
-        return await build_market_technicals_response(ticker=ticker, days=days)
+        response = await build_market_technicals_response(ticker=ticker, days=days)
+        set_request_log_context(request, cache_hit=response.get("cache_hit"))
+        return response
     except Exception as error:
         raise market_error_to_http_exception(error)

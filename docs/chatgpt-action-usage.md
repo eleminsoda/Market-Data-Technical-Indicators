@@ -73,6 +73,20 @@ X-API-Key: <action-api-key>
 
 This is the API key for the backend Action, not the market-data provider key.
 
+Backend authentication works by matching the incoming `X-API-Key` header against the backend's configured `API_KEY` value. `ACTION_API_KEY` is also accepted as a backward-compatible environment-variable alias. If neither `API_KEY` nor `ACTION_API_KEY` is configured, authentication is disabled; this is convenient for local development but should not be used for public deployments.
+
+Request flow:
+
+```text
+Custom GPT Action
+  -- X-API-Key: API_KEY -->
+Market Technical API backend
+  -- apiKey=POLYGON_API_KEY -->
+Polygon/Massive
+```
+
+The Custom GPT should only know the Action API key used in `X-API-Key`. It should never know or ask for `POLYGON_API_KEY`.
+
 ## Required Data Disclosure
 
 When using Action-derived technical data, the assistant must disclose:
