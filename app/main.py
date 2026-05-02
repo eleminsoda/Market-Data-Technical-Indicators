@@ -19,6 +19,11 @@ from app.schemas import ErrorResponse, TechnicalBatchRequest, TechnicalBatchResp
 APP_VERSION = "0.1.0"
 HTTP_422_UNPROCESSABLE_ENTITY = 422
 logger = logging.getLogger("market_technical_api")
+logger.setLevel(logging.INFO)
+if not logger.handlers:
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(logging.Formatter("%(message)s"))
+    logger.addHandler(stream_handler)
 
 app = FastAPI(
     title="Market Technical API",
