@@ -1,0 +1,699 @@
+openapi: 3.1.0
+info:
+  title: Market Technical API
+  version: 0.1.0
+  description: Daily-bar-derived market technical indicators for Custom GPT Actions.
+servers:
+  - url: https://market-data-technical-indicators.onrender.com
+    description: Render production deployment
+paths:
+  /v1/market/technicals/{ticker}:
+    get:
+      operationId: getStockTechnicals
+      summary: Get stock technicals
+      description: Fetch daily-bar-derived technical indicators for one stock ticker.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: ticker
+          in: path
+          required: true
+          description: Stock ticker symbol.
+          schema:
+            type: string
+            example: AAPL
+        - name: days
+          in: query
+          required: false
+          description: Calendar-day lookback for daily OHLCV data.
+          schema:
+            type: integer
+            default: 450
+            minimum: 80
+            maximum: 1000
+      responses:
+        "200":
+          description: Successful response with technical data for one ticker.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TechnicalResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/InvalidRequest"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "502":
+          $ref: "#/components/responses/UpstreamError"
+        "504":
+          $ref: "#/components/responses/UpstreamTimeout"
+  /v1/market/technicals/batch:
+    post:
+      operationId: getBatchStockTechnicals
+      summary: Get batch stock technicals
+      description: Fetch daily-bar-derived technical indicators for multiple stock tickers.
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TechnicalBatchRequest"
+            example:
+              tickers:
+                - AAPL
+                - MSFT
+                - NVDA
+              days: 450
+      responses:
+        "200":
+          description: Successful batch response. Partial success is possible; inspect the errors array.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TechnicalBatchResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/InvalidRequest"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "502":
+          $ref: "#/components/responses/UpstreamError"
+        "504":
+          $ref: "#/components/responses/UpstreamTimeout"
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: Backend Action API key. Do not use or expose the market-data provider key.
+  responses:
+    BadRequest:
+      description: Market data provider rejected the request.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Forbidden:
+      description: API key is missing or invalid.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotFound:
+      description: Requested market data was not found.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    InvalidRequest:
+      description: Request validation failed.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    RateLimited:
+      description: Market data provider rate limit exceeded.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    InternalError:
+      description: Unexpected backend error.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    UpstreamError:
+      description: Market data provider returned an upstream error.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    UpstreamTimeout:
+      description: Market data provider request timed out.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+  schemas:
+    TechnicalBatchRequest:
+      type: object
+      required:
+        - tickers
+      properties:
+        tickers:
+          type: array
+          minItems: 1
+          maxItems: 10
+          description: List of stock ticker symbols.
+          items:
+            type: string
+          example:
+            - AAPL
+            - MSFT
+            - NVDA
+        days:
+          type: integer
+          default: 450
+          minimum: 80
+          maximum: 1000
+          description: Calendar-day lookback for daily OHLCV data.
+    TechnicalBatchResponse:
+      type: object
+      required:
+        - requested_count
+        - returned_count
+        - results
+        - errors
+      properties:
+        requested_count:
+          type: integer
+          description: Number of tickers requested after backend normalization and de-duplication.
+        returned_count:
+          type: integer
+          description: Number of successful ticker results.
+        results:
+          type: array
+          description: Successful ticker technical responses.
+          items:
+            $ref: "#/components/schemas/TechnicalResponse"
+        errors:
+          type: array
+          description: Per-ticker failures. A 200 batch response can still contain errors.
+          items:
+            $ref: "#/components/schemas/TechnicalBatchError"
+    TechnicalBatchError:
+      type: object
+      required:
+        - ticker
+        - status_code
+        - error
+        - message
+      properties:
+        ticker:
+          type: string
+        status_code:
+          type: integer
+        error:
+          type: string
+        message:
+          type: string
+        retryable:
+          type: boolean
+          default: false
+    TechnicalResponse:
+      type: object
+      required:
+        - ticker
+        - as_of
+        - adjusted
+        - requested_lookback_days
+        - bars_returned
+        - cache_hit
+        - technical_summary
+        - price
+        - trend
+        - moving_averages
+        - volume
+        - momentum
+        - volatility
+        - levels
+        - breakout
+        - structure
+        - liquidity
+        - gap
+        - candles_tail
+      properties:
+        ticker:
+          type: string
+          description: Normalized uppercase ticker symbol.
+        as_of:
+          type: string
+          description: Date of the latest daily bar used.
+          example: "2026-04-30"
+        source:
+          type: string
+          const: polygon
+          default: polygon
+        adjusted:
+          type: boolean
+          description: Whether returned bars were adjusted by the market-data provider.
+        timespan:
+          type: string
+          const: day
+          default: day
+        requested_lookback_days:
+          type: integer
+        bars_returned:
+          type: integer
+        cache_hit:
+          type: boolean
+        data_warnings:
+          type: array
+          items:
+            type: string
+        not_financial_advice:
+          type: boolean
+          default: true
+        technical_summary:
+          type: string
+          description: Concise deterministic technical summary.
+        price:
+          type:
+            - number
+            - "null"
+          description: Latest daily close.
+        trend:
+          $ref: "#/components/schemas/Trend"
+        moving_averages:
+          $ref: "#/components/schemas/MovingAverages"
+        volume:
+          $ref: "#/components/schemas/VolumeSummary"
+        momentum:
+          $ref: "#/components/schemas/Momentum"
+        volatility:
+          $ref: "#/components/schemas/Volatility"
+        levels:
+          $ref: "#/components/schemas/Levels"
+        breakout:
+          $ref: "#/components/schemas/Breakout"
+        structure:
+          $ref: "#/components/schemas/Structure"
+        liquidity:
+          $ref: "#/components/schemas/Liquidity"
+        gap:
+          $ref: "#/components/schemas/Gap"
+        candles_tail:
+          type: array
+          description: Last 10 daily OHLCV candles.
+          items:
+            $ref: "#/components/schemas/Candle"
+    Trend:
+      type: object
+      properties:
+        above_20dma:
+          type: boolean
+        above_50dma:
+          type: boolean
+        above_200dma:
+          type: boolean
+        ma_alignment:
+          type: string
+          enum:
+            - bullish
+            - bearish
+            - mixed
+            - unknown
+        ema_crossover:
+          type: string
+          enum:
+            - bullish
+            - bearish
+            - none
+            - insufficient_data
+        trend_score:
+          type: integer
+        trend_score_max:
+          type: integer
+        trend_strength:
+          type: string
+          enum:
+            - strong_uptrend
+            - constructive
+            - mixed_or_weak
+            - bearish_or_broken
+            - partial_constructive
+            - partial_bearish_or_broken
+            - unknown_or_partial
+        trend_score_components:
+          $ref: "#/components/schemas/TrendScoreComponents"
+    TrendScoreComponents:
+      type: object
+      properties:
+        price_above_sma_20:
+          type:
+            - boolean
+            - "null"
+        price_above_sma_50:
+          type:
+            - boolean
+            - "null"
+        price_above_sma_200:
+          type:
+            - boolean
+            - "null"
+        sma_20_above_sma_50:
+          type:
+            - boolean
+            - "null"
+        sma_50_above_sma_200:
+          type:
+            - boolean
+            - "null"
+    MovingAverages:
+      type: object
+      properties:
+        sma_20:
+          type:
+            - number
+            - "null"
+        sma_50:
+          type:
+            - number
+            - "null"
+        sma_200:
+          type:
+            - number
+            - "null"
+        ema_12:
+          type:
+            - number
+            - "null"
+        ema_26:
+          type:
+            - number
+            - "null"
+        distance_from_sma_20_pct:
+          type:
+            - number
+            - "null"
+        distance_from_sma_50_pct:
+          type:
+            - number
+            - "null"
+        distance_from_sma_200_pct:
+          type:
+            - number
+            - "null"
+    VolumeSummary:
+      type: object
+      properties:
+        latest_volume:
+          type:
+            - number
+            - "null"
+        avg_20d_volume:
+          type:
+            - number
+            - "null"
+        previous_20d_avg_volume:
+          type:
+            - number
+            - "null"
+        volume_ratio_vs_20d:
+          type:
+            - number
+            - "null"
+        volume_ratio_vs_previous_20d:
+          type:
+            - number
+            - "null"
+        volume_signal:
+          type: string
+          enum:
+            - very_high
+            - above_average
+            - normal
+            - below_average
+            - unknown
+        price_volume_confirmation:
+          type: string
+          enum:
+            - up_on_above_average_volume
+            - up_on_low_volume
+            - down_on_above_average_volume
+            - down_on_low_volume
+            - flat_or_mixed
+            - unknown
+    Momentum:
+      type: object
+      properties:
+        rsi_14:
+          type:
+            - number
+            - "null"
+        macd:
+          type:
+            - number
+            - "null"
+        macd_signal:
+          type:
+            - number
+            - "null"
+        macd_histogram:
+          type:
+            - number
+            - "null"
+        macd_signal_text:
+          type: string
+          enum:
+            - positive
+            - negative
+            - neutral
+        return_5d_pct:
+          type:
+            - number
+            - "null"
+        return_20d_pct:
+          type:
+            - number
+            - "null"
+        return_60d_pct:
+          type:
+            - number
+            - "null"
+    Volatility:
+      type: object
+      properties:
+        atr_14:
+          type:
+            - number
+            - "null"
+        bollinger_middle:
+          type:
+            - number
+            - "null"
+        bollinger_upper:
+          type:
+            - number
+            - "null"
+        bollinger_lower:
+          type:
+            - number
+            - "null"
+        bollinger_bandwidth_pct:
+          type:
+            - number
+            - "null"
+        bollinger_percent_b:
+          type:
+            - number
+            - "null"
+    Levels:
+      type: object
+      properties:
+        support_20d_low:
+          type:
+            - number
+            - "null"
+        resistance_20d_high:
+          type:
+            - number
+            - "null"
+        high_52w:
+          type:
+            - number
+            - "null"
+        low_52w:
+          type:
+            - number
+            - "null"
+        distance_from_52w_high_pct:
+          type:
+            - number
+            - "null"
+        distance_from_52w_low_pct:
+          type:
+            - number
+            - "null"
+    Breakout:
+      type: object
+      properties:
+        previous_20d_high:
+          type:
+            - number
+            - "null"
+        previous_20d_low:
+          type:
+            - number
+            - "null"
+        previous_60d_high:
+          type:
+            - number
+            - "null"
+        previous_60d_low:
+          type:
+            - number
+            - "null"
+        high_above_previous_20d_high:
+          type:
+            - boolean
+            - "null"
+        close_above_previous_20d_high:
+          type:
+            - boolean
+            - "null"
+        low_below_previous_20d_low:
+          type:
+            - boolean
+            - "null"
+        close_below_previous_20d_low:
+          type:
+            - boolean
+            - "null"
+        high_above_previous_60d_high:
+          type:
+            - boolean
+            - "null"
+        close_above_previous_60d_high:
+          type:
+            - boolean
+            - "null"
+        low_below_previous_60d_low:
+          type:
+            - boolean
+            - "null"
+        close_below_previous_60d_low:
+          type:
+            - boolean
+            - "null"
+        breakout_volume_confirmed:
+          type: boolean
+        breakdown_volume_confirmed:
+          type: boolean
+    Structure:
+      type: object
+      properties:
+        close_vs_previous_20d_high_pct:
+          type:
+            - number
+            - "null"
+        close_vs_previous_20d_low_pct:
+          type:
+            - number
+            - "null"
+        close_vs_previous_60d_high_pct:
+          type:
+            - number
+            - "null"
+        close_vs_previous_60d_low_pct:
+          type:
+            - number
+            - "null"
+        near_previous_20d_high:
+          type:
+            - boolean
+            - "null"
+        near_previous_20d_low:
+          type:
+            - boolean
+            - "null"
+        range_position_20d_pct:
+          type:
+            - number
+            - "null"
+        range_position_60d_pct:
+          type:
+            - number
+            - "null"
+    Liquidity:
+      type: object
+      properties:
+        avg_20d_dollar_volume:
+          type:
+            - number
+            - "null"
+        liquidity_tier:
+          type: string
+          enum:
+            - high
+            - medium
+            - low
+            - unknown
+    Gap:
+      type: object
+      properties:
+        gap_pct:
+          type:
+            - number
+            - "null"
+        gap_direction:
+          type: string
+          enum:
+            - up
+            - down
+            - none
+            - unknown
+        large_gap:
+          type:
+            - boolean
+            - "null"
+    Candle:
+      type: object
+      properties:
+        date:
+          type: string
+        open:
+          type:
+            - number
+            - "null"
+        high:
+          type:
+            - number
+            - "null"
+        low:
+          type:
+            - number
+            - "null"
+        close:
+          type:
+            - number
+            - "null"
+        volume:
+          type:
+            - number
+            - "null"
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+        - status_code
+      properties:
+        error:
+          type: string
+          example: invalid_request
+        message:
+          type: string
+          example: "Invalid request field 'query.days': Input should be greater than or equal to 80"
+        status_code:
+          type: integer
+          example: 422
+        retryable:
+          type: boolean
+          default: false
